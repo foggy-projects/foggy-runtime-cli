@@ -1,0 +1,21 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "foggy-runtime-cli"
+version = "0.1.0"
+description = "Standalone CLI for Foggy Runtime API v1"
+readme = "README.md"
+requires-python = ">=3.11"
+authors = [
+    {name = "Foggy Team"}
+]
+dependencies = []
+
+[project.scripts]
+foggy-runtime = "foggy_runtime_cli.main:console_main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/foggy_runtime_cli"]
+
