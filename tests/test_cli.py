@@ -63,43 +63,36 @@ class CliTest(unittest.TestCase):
         self.assertIn('"success": true', output)
         self.assertEqual("", error)
 
-    def test_python_engine_uses_python_base_url_profile(self) -> None:
+    def test_default_base_url_is_generic_local_runtime(self) -> None:
         with patch.dict(os.environ, {}, clear=True):
-            code, _output, _error = self.run_cli(["--engine", "python", "capabilities"])
+            code, _output, _error = self.run_cli(["capabilities"])
 
         self.assertEqual(EXIT_OK, code)
-        self.assertEqual(("http://127.0.0.1:8066", None, 30.0), FakeClient.init_args)
+        self.assertEqual(("http://127.0.0.1:8080", None, 30.0), FakeClient.init_args)
         self.assertEqual([("GET", "/api/v1/capabilities", None)], FakeClient.calls)
 
-    def test_base_url_overrides_engine_profile(self) -> None:
-        with patch.dict(os.environ, {}, clear=True):
-            code, _output, _error = self.run_cli(
-                ["--engine", "python", "--base-url", "http://runtime", "capabilities"]
-            )
+    def test_base_url_overrides_generic_env_base_url(self) -> None:
+        with patch.dict(os.environ, {"FOGGY_RUNTIME_API_URL": "http://generic-runtime"}, clear=True):
+            code, _output, _error = self.run_cli(["--base-url", "http://runtime", "capabilities"])
 
         self.assertEqual(EXIT_OK, code)
         self.assertEqual(("http://runtime", None, 30.0), FakeClient.init_args)
 
-    def test_engine_specific_env_base_url(self) -> None:
-        with patch.dict(os.environ, {"FOGGY_PYTHON_RUNTIME_API_URL": "http://python-runtime"}, clear=True):
-            code, _output, _error = self.run_cli(["--engine", "python", "capabilities"])
-
-        self.assertEqual(EXIT_OK, code)
-        self.assertEqual(("http://python-runtime", None, 30.0), FakeClient.init_args)
-
-    def test_generic_env_base_url_overrides_engine_profile(self) -> None:
-        with patch.dict(
-            os.environ,
-            {
-                "FOGGY_RUNTIME_API_URL": "http://generic-runtime",
-                "FOGGY_PYTHON_RUNTIME_API_URL": "http://python-runtime",
-            },
-            clear=True,
-        ):
-            code, _output, _error = self.run_cli(["--engine", "python", "capabilities"])
+    def test_generic_env_base_url(self) -> None:
+        with patch.dict(os.environ, {"FOGGY_RUNTIME_API_URL": "http://generic-runtime"}, clear=True):
+            code, _output, _error = self.run_cli(["capabilities"])
 
         self.assertEqual(EXIT_OK, code)
         self.assertEqual(("http://generic-runtime", None, 30.0), FakeClient.init_args)
+
+    def test_engine_option_is_not_supported(self) -> None:
+        with patch.dict(os.environ, {}, clear=True):
+            with patch("sys.stderr", io.StringIO()):
+                with self.assertRaises(SystemExit) as raised:
+                    self.run_cli(["--engine", "python", "capabilities"])
+
+        self.assertEqual(2, raised.exception.code)
+        self.assertEqual([], FakeClient.calls)
 
     def test_namespace_and_model_describe_body(self) -> None:
         code, _output, _error = self.run_cli(

@@ -8,7 +8,6 @@ The CLI talks only to `/api/v1/*` runtime endpoints. It does not call Java or Py
 
 ```powershell
 foggy-runtime --base-url http://127.0.0.1:8080 capabilities
-foggy-runtime --engine python capabilities
 foggy-runtime models list
 foggy-runtime models describe FactSalesQueryModel
 foggy-runtime models refresh --model FactSalesQueryModel
@@ -20,7 +19,9 @@ foggy-runtime tables inspect --table sale_order --schema public --include-indexe
 
 JSON output is the default and preserves the Runtime API envelope for Skill consumption.
 
-`--engine` selects only a base-url profile. `java` defaults to `http://127.0.0.1:8080`, and `python` defaults to `http://127.0.0.1:8066`. `--base-url` always wins, followed by `FOGGY_RUNTIME_API_URL`, then `FOGGY_JAVA_RUNTIME_API_URL` or `FOGGY_PYTHON_RUNTIME_API_URL`.
+The CLI is backend-neutral and does not select Java or Python. `--base-url` always wins, followed by `FOGGY_RUNTIME_API_URL`, then the local development default `http://127.0.0.1:8080`.
+
+Use `capabilities` to inspect the connected runtime's engine, Runtime API version, schema version, security mode, and supported capability map.
 
 `models validate` sends `clearExisting=true` by default so repeated validation runs replace the temporary runtime validation bundle. Use `--no-clear-existing` only when debugging bundle watch behavior.
 

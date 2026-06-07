@@ -14,9 +14,7 @@ EXIT_API_ERROR = 2
 EXIT_UNSUPPORTED = 3
 EXIT_TRANSPORT_ERROR = 4
 
-DEFAULT_JAVA_BASE_URL = "http://127.0.0.1:8080"
-DEFAULT_PYTHON_BASE_URL = "http://127.0.0.1:8066"
-SUPPORTED_ENGINES = ("java", "python")
+DEFAULT_BASE_URL = "http://127.0.0.1:8080"
 
 
 def console_main() -> None:
@@ -58,13 +56,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--base-url",
         default=None,
-        help="Foggy Runtime API base URL. Overrides --engine URL defaults.",
-    )
-    parser.add_argument(
-        "--engine",
-        choices=SUPPORTED_ENGINES,
-        default=os.environ.get("FOGGY_RUNTIME_ENGINE", "java"),
-        help="Runtime engine URL profile. Commands still call only Runtime API v1.",
+        help="Foggy Runtime API base URL. Overrides FOGGY_RUNTIME_API_URL.",
     )
     parser.add_argument("--namespace", default=os.environ.get("FOGGY_NAMESPACE"), help="Namespace sent as X-NS.")
     parser.add_argument("--output", choices=["json", "pretty"], default="json", help="Output format.")
@@ -137,9 +129,7 @@ def resolve_base_url(args: argparse.Namespace) -> str:
     generic = os.environ.get("FOGGY_RUNTIME_API_URL")
     if generic:
         return generic
-    if args.engine == "python":
-        return os.environ.get("FOGGY_PYTHON_RUNTIME_API_URL", DEFAULT_PYTHON_BASE_URL)
-    return os.environ.get("FOGGY_JAVA_RUNTIME_API_URL", DEFAULT_JAVA_BASE_URL)
+    return DEFAULT_BASE_URL
 
 
 def build_body(args: argparse.Namespace, stdin: TextIO, stderr: TextIO) -> dict[str, Any] | None | object:
