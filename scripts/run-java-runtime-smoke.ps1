@@ -96,6 +96,13 @@ function Invoke-CliCommand {
         $ErrorActionPreference = $previousErrorActionPreference
     }
     $result = if ($ExpectedExitCodes -contains $exitCode) { "passed" } else { "failed" }
+    $validationMessage = ""
+    if ($result -eq "passed") {
+        $validationMessage = Test-CliJsonOutput -Name $Name -OutputPath $outFile
+        if ($validationMessage) {
+            $result = "failed"
+        }
+    }
     [pscustomobject]@{
         Command = $Name
         ExitCode = $exitCode
@@ -103,7 +110,107 @@ function Invoke-CliCommand {
         Output = $outFile
         Error = $errFile
         Arguments = $Arguments
+        ValidationMessage = $validationMessage
     }
+}
+
+function Test-CliJsonOutput {
+    param(
+        [string]$Name,
+        [string]$OutputPath
+    )
+
+    try {
+        $body = Get-Content $OutputPath -Raw | ConvertFrom-Json
+    }
+    catch {
+        return "Output is not valid JSON: $($_.Exception.Message)"
+    }
+
+    if ($body.success -ne $true) {
+        return "Runtime envelope success is not true."
+    }
+
+    switch ($Name) {
+        "ready-capabilities" {
+            return Test-CapabilitiesOutput -Body $body
+        }
+        "capabilities" {
+            return Test-CapabilitiesOutput -Body $body
+        }
+        "models-refresh" {
+            if ([int]$body.data.failedCount -ne 0) {
+                return "models.refresh failedCount is $($body.data.failedCount)."
+            }
+            if ([int]$body.data.loadedCount -lt 1) {
+                return "models.refresh loadedCount is $($body.data.loadedCount)."
+            }
+        }
+        "models-validate" {
+            if ($body.data.valid -ne $true) {
+                return "models.validate data.valid is not true."
+            }
+            if ([int]$body.data.totalFiles -lt 2) {
+                return "models.validate totalFiles is $($body.data.totalFiles)."
+            }
+            if ([int]$body.data.invalidFiles -ne 0) {
+                return "models.validate invalidFiles is $($body.data.invalidFiles)."
+            }
+        }
+        "models-describe" {
+            if (-not $body.data.data.models.$ModelName) {
+                return "models.describe does not include model $ModelName."
+            }
+            if (-not $body.data.data.fields -or $body.data.data.fields.PSObject.Properties.Count -lt 1) {
+                return "models.describe has no fields."
+            }
+        }
+        "query-validate" {
+            if ($body.diagnostics.warnings.Count -gt 0) {
+                return "query.validate returned diagnostics warnings."
+            }
+        }
+        "query-execute" {
+            if (-not $body.data.items -or $body.data.items.Count -lt 1) {
+                return "query.execute returned no items."
+            }
+        }
+        "tables-inspect" {
+            if ($body.data.table -ne $TableName) {
+                return "tables.inspect returned table $($body.data.table), expected $TableName."
+            }
+            if (-not $body.data.columns -or $body.data.columns.Count -lt 1) {
+                return "tables.inspect returned no columns."
+            }
+        }
+    }
+
+    return ""
+}
+
+function Test-CapabilitiesOutput {
+    param([object]$Body)
+
+    if ($Body.engine -ne "java") {
+        return "capabilities engine is $($Body.engine), expected java."
+    }
+    if ($Body.runtimeApiVersion -ne "foggy-runtime-api/v1") {
+        return "capabilities runtimeApiVersion is $($Body.runtimeApiVersion)."
+    }
+    if ($Body.data.schemaVersion -ne "2026-06-06") {
+        return "capabilities schemaVersion is $($Body.data.schemaVersion)."
+    }
+    if ($Body.data.securityMode -ne "none-dev-test-only") {
+        return "capabilities securityMode is $($Body.data.securityMode)."
+    }
+    foreach ($capability in @("models.refresh", "models.validate", "models.describe", "query.validate", "query.execute", "tables.inspect")) {
+        $value = $Body.data.capabilities.PSObject.Properties[$capability].Value
+        if ($value -ne "supported") {
+            return "capability $capability is $value."
+        }
+    }
+
+    return ""
 }
 
 function Wait-RuntimeReady {
@@ -227,8 +334,8 @@ try {
     $results = @()
     $results += Invoke-CliCommand -Name "capabilities" -Arguments @("capabilities")
     $results += Invoke-CliCommand -Name "models-list" -Arguments @("models", "list")
-    $results += Invoke-CliCommand -Name "models-refresh" -Arguments @("models", "refresh", "--model", $ModelName)
     $results += Invoke-CliCommand -Name "models-validate" -Arguments @("models", "validate", "--models-dir", $ModelsDir)
+    $results += Invoke-CliCommand -Name "models-refresh" -Arguments @("models", "refresh", "--model", $ModelName)
     $results += Invoke-CliCommand -Name "models-describe" -Arguments @("models", "describe", $ModelName)
     $results += Invoke-CliCommand -Name "query-validate" -Arguments @("query", "validate", $ModelName, "--payload", $QueryPayload)
     $results += Invoke-CliCommand -Name "query-execute" -Arguments @("query", "execute", $ModelName, "--payload", $QueryPayload)
