@@ -266,14 +266,28 @@ class CliTest(unittest.TestCase):
         FakeClient.response = {
             "success": True,
             "engine": "java",
-            "data": {"capabilities": {"models.refresh": "supported", "query.execute": "unsupported"}},
+            "runtimeApiVersion": "foggy-runtime-api/v1",
+            "data": {
+                "engine": "java",
+                "runtimeApiVersion": "foggy-runtime-api/v1",
+                "schemaVersion": "2026-06-06",
+                "enabled": True,
+                "securityMode": "none-dev-test-only",
+                "capabilities": {"models.refresh": "supported", "query.execute": "unsupported"},
+            },
         }
 
         code, output, _error = self.run_cli(["--output", "pretty", "capabilities"])
 
         self.assertEqual(EXIT_OK, code)
-        self.assertIn("models.refresh: supported", output)
-        self.assertIn("query.execute: unsupported", output)
+        self.assertIn("engine: java", output)
+        self.assertIn("runtimeApiVersion: foggy-runtime-api/v1", output)
+        self.assertIn("schemaVersion: 2026-06-06", output)
+        self.assertIn("enabled: true", output)
+        self.assertIn("securityMode: none-dev-test-only", output)
+        self.assertIn("capabilities:", output)
+        self.assertIn("  models.refresh: supported", output)
+        self.assertIn("  query.execute: unsupported", output)
 
     def test_generic_success_pretty_output(self) -> None:
         FakeClient.response = {"success": True, "engine": "python", "data": {"ok": True}}

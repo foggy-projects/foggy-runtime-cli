@@ -241,8 +241,30 @@ def pretty_response(response: dict[str, Any]) -> str:
         if "models" in data and isinstance(data["models"], list):
             return "\n".join(str(item) for item in data["models"])
         if "capabilities" in data and isinstance(data["capabilities"], dict):
-            return "\n".join(f"{key}: {value}" for key, value in sorted(data["capabilities"].items()))
+            return pretty_capabilities(response, data)
     return f"OK [{engine}]"
+
+
+def pretty_capabilities(response: dict[str, Any], data: dict[str, Any]) -> str:
+    engine = response.get("engine") or data.get("engine") or "unknown"
+    runtime_api_version = response.get("runtimeApiVersion") or data.get("runtimeApiVersion") or "unknown"
+    lines = [
+        f"engine: {engine}",
+        f"runtimeApiVersion: {runtime_api_version}",
+    ]
+    schema_version = data.get("schemaVersion")
+    if schema_version is not None:
+        lines.append(f"schemaVersion: {schema_version}")
+    enabled = data.get("enabled")
+    if enabled is not None:
+        lines.append(f"enabled: {str(bool(enabled)).lower()}")
+    security_mode = data.get("securityMode")
+    if security_mode is not None:
+        lines.append(f"securityMode: {security_mode}")
+    lines.append("capabilities:")
+    capabilities = data["capabilities"]
+    lines.extend(f"  {key}: {value}" for key, value in sorted(capabilities.items()))
+    return "\n".join(lines)
 
 
 def exit_code_for_response(response: dict[str, Any]) -> int:

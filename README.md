@@ -23,6 +23,21 @@ The CLI is backend-neutral and does not select Java or Python. `--base-url` alwa
 
 Use `capabilities` to inspect the connected runtime's engine, Runtime API version, schema version, security mode, and supported capability map.
 
+For human diagnostics, `--output pretty capabilities` prints a compact runtime summary:
+
+```text
+engine: java
+runtimeApiVersion: foggy-runtime-api/v1
+schemaVersion: 2026-06-06
+enabled: true
+securityMode: none-dev-test-only
+capabilities:
+  models.refresh: supported
+  query.validate: supported
+```
+
+Automation and Skills should keep using JSON output so they can validate the full envelope and diagnostics.
+
 `models validate` sends `clearExisting=true` by default so repeated validation runs replace the temporary runtime validation bundle. Use `--no-clear-existing` only when debugging bundle watch behavior.
 
 When validating copied fixtures, confirm the runtime datasource first. For the Java `lite` profile, use `docs/v4.1/contracts/runtime-api-v1/model-fixtures/minimal-fact-order` as the default smoke fixture; the broader ecommerce demo directory requires a fuller schema and is expected to fail under lite.
