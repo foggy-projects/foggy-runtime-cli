@@ -3,7 +3,9 @@ from __future__ import annotations
 import io
 import json
 import os
+import tempfile
 import unittest
+from pathlib import Path
 from typing import Any
 from unittest.mock import patch
 
@@ -12,6 +14,7 @@ from foggy_runtime_cli.main import (
     EXIT_OK,
     EXIT_TRANSPORT_ERROR,
     EXIT_UNSUPPORTED,
+    console_main,
     main,
 )
 
@@ -84,6 +87,20 @@ class CliTest(unittest.TestCase):
         self.assertEqual(EXIT_OK, code)
         self.assertEqual(("http://python-runtime", None, 30.0), FakeClient.init_args)
 
+    def test_generic_env_base_url_overrides_engine_profile(self) -> None:
+        with patch.dict(
+            os.environ,
+            {
+                "FOGGY_RUNTIME_API_URL": "http://generic-runtime",
+                "FOGGY_PYTHON_RUNTIME_API_URL": "http://python-runtime",
+            },
+            clear=True,
+        ):
+            code, _output, _error = self.run_cli(["--engine", "python", "capabilities"])
+
+        self.assertEqual(EXIT_OK, code)
+        self.assertEqual(("http://generic-runtime", None, 30.0), FakeClient.init_args)
+
     def test_namespace_and_model_describe_body(self) -> None:
         code, _output, _error = self.run_cli(
             [
@@ -92,6 +109,8 @@ class CliTest(unittest.TestCase):
                 "models",
                 "describe",
                 "Sales Model",
+                "--format",
+                "frontend-meta",
                 "--field",
                 "amount",
                 "--level",
@@ -109,6 +128,7 @@ class CliTest(unittest.TestCase):
                     "/api/v1/models/Sales%20Model/describe",
                     {
                         "namespace": "dev",
+                        "format": "frontend-meta",
                         "fields": ["amount"],
                         "levels": [1],
                         "includeExamples": True,
@@ -119,13 +139,29 @@ class CliTest(unittest.TestCase):
         )
 
     def test_refresh_models_body(self) -> None:
-        code, _output, _error = self.run_cli(["models", "refresh", "--model", "A", "--model", "B"])
+        code, _output, _error = self.run_cli(
+            ["--namespace", "dev", "models", "refresh", "--model", "A", "--model", "B"]
+        )
 
         self.assertEqual(EXIT_OK, code)
-        self.assertEqual([("POST", "/api/v1/models/refresh", {"models": ["A", "B"]})], FakeClient.calls)
+        self.assertEqual(
+            [("POST", "/api/v1/models/refresh", {"namespace": "dev", "models": ["A", "B"]})],
+            FakeClient.calls,
+        )
 
     def test_validate_models_dir_body(self) -> None:
-        code, _output, _error = self.run_cli(["models", "validate", "--models-dir", "./models"])
+        code, _output, _error = self.run_cli(
+            [
+                "--namespace",
+                "dev",
+                "models",
+                "validate",
+                "--models-dir",
+                "./models",
+                "--watch",
+                "--include-stack-trace",
+            ]
+        )
 
         self.assertEqual(EXIT_OK, code)
         self.assertEqual(
@@ -135,9 +171,10 @@ class CliTest(unittest.TestCase):
                     "/api/v1/models/validate",
                     {
                         "path": "./models",
-                        "watch": False,
+                        "watch": True,
                         "clearExisting": True,
-                        "includeStackTrace": False,
+                        "includeStackTrace": True,
+                        "namespace": "dev",
                     },
                 )
             ],
@@ -170,9 +207,39 @@ class CliTest(unittest.TestCase):
             FakeClient.calls,
         )
 
+    def test_query_execute_payload_from_file(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            payload_path = Path(temp_dir) / "payload.json"
+            payload_path.write_text(json.dumps({"columns": ["amount"], "limit": 10}), encoding="utf-8")
+
+            code, _output, _error = self.run_cli(["query", "execute", "Fact Sales", "--payload", str(payload_path)])
+
+        self.assertEqual(EXIT_OK, code)
+        self.assertEqual(
+            [
+                (
+                    "POST",
+                    "/api/v1/query/Fact%20Sales/execute",
+                    {"columns": ["amount"], "limit": 10},
+                )
+            ],
+            FakeClient.calls,
+        )
+
     def test_table_inspect_body(self) -> None:
         code, _output, _error = self.run_cli(
-            ["tables", "inspect", "--table", "sale_order", "--schema", "public", "--include-indexes"]
+            [
+                "tables",
+                "inspect",
+                "--table",
+                "sale_order",
+                "--schema",
+                "public",
+                "--data-source",
+                "main",
+                "--include-indexes",
+                "--include-foreign-keys",
+            ]
         )
 
         self.assertEqual(EXIT_OK, code)
@@ -184,13 +251,44 @@ class CliTest(unittest.TestCase):
                     {
                         "table": "sale_order",
                         "schema": "public",
+                        "dataSource": "main",
                         "includeIndexes": True,
-                        "includeForeignKeys": False,
+                        "includeForeignKeys": True,
                     },
                 )
             ],
             FakeClient.calls,
         )
+
+    def test_models_list_pretty_output(self) -> None:
+        FakeClient.response = {"success": True, "engine": "java", "data": {"models": ["FactSales", "DimCustomer"]}}
+
+        code, output, _error = self.run_cli(["--output", "pretty", "models", "list"])
+
+        self.assertEqual(EXIT_OK, code)
+        self.assertEqual([("GET", "/api/v1/models", None)], FakeClient.calls)
+        self.assertEqual("FactSales\nDimCustomer\n", output)
+
+    def test_capabilities_pretty_output(self) -> None:
+        FakeClient.response = {
+            "success": True,
+            "engine": "java",
+            "data": {"capabilities": {"models.refresh": "supported", "query.execute": "unsupported"}},
+        }
+
+        code, output, _error = self.run_cli(["--output", "pretty", "capabilities"])
+
+        self.assertEqual(EXIT_OK, code)
+        self.assertIn("models.refresh: supported", output)
+        self.assertIn("query.execute: unsupported", output)
+
+    def test_generic_success_pretty_output(self) -> None:
+        FakeClient.response = {"success": True, "engine": "python", "data": {"ok": True}}
+
+        code, output, _error = self.run_cli(["--output", "pretty", "capabilities"])
+
+        self.assertEqual(EXIT_OK, code)
+        self.assertEqual("OK [python]\n", output)
 
     def test_api_error_exit_code(self) -> None:
         FakeClient.response = {
@@ -201,6 +299,18 @@ class CliTest(unittest.TestCase):
         code, _output, _error = self.run_cli(["capabilities"])
 
         self.assertEqual(EXIT_API_ERROR, code)
+
+    def test_api_error_pretty_output(self) -> None:
+        FakeClient.response = {
+            "success": False,
+            "engine": "java",
+            "error": {"code": "FIELD_NOT_FOUND", "phase": "query.validate", "message": "bad field"},
+        }
+
+        code, output, _error = self.run_cli(["--output", "pretty", "capabilities"])
+
+        self.assertEqual(EXIT_API_ERROR, code)
+        self.assertEqual("ERROR [java] FIELD_NOT_FOUND at query.validate: bad field\n", output)
 
     def test_malformed_envelope_is_api_error(self) -> None:
         FakeClient.response = {"engine": "java", "data": {}}
@@ -226,6 +336,13 @@ class CliTest(unittest.TestCase):
         self.assertIn("input error", error)
         self.assertEqual([], FakeClient.calls)
 
+    def test_json_payload_must_be_object(self) -> None:
+        code, _output, error = self.run_cli(["query", "execute", "FactSales", "--payload", "-"], stdin="[]")
+
+        self.assertEqual(1, code)
+        self.assertIn("must contain a JSON object", error)
+        self.assertEqual([], FakeClient.calls)
+
     def test_missing_payload_file_is_cli_error(self) -> None:
         code, _output, error = self.run_cli(["query", "execute", "FactSales", "--payload", "missing.json"])
 
@@ -242,6 +359,13 @@ class CliTest(unittest.TestCase):
 
         self.assertEqual(EXIT_TRANSPORT_ERROR, code)
         self.assertIn("transport error", error)
+
+    def test_console_main_raises_system_exit(self) -> None:
+        with patch("foggy_runtime_cli.main.main", return_value=EXIT_OK):
+            with self.assertRaises(SystemExit) as raised:
+                console_main()
+
+        self.assertEqual(EXIT_OK, raised.exception.code)
 
 
 if __name__ == "__main__":

@@ -5,13 +5,16 @@ import threading
 import unittest
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
+from unittest.mock import patch
+from urllib.error import URLError
 
-from foggy_runtime_cli.client import RuntimeApiClient
+from foggy_runtime_cli.client import RuntimeApiClient, RuntimeTransportError
 
 
 class CapturingHandler(BaseHTTPRequestHandler):
     response_status = 200
     response_body: dict[str, Any] = {"success": True, "engine": "java", "data": {"ok": True}}
+    response_payload: bytes | None = None
     captured: dict[str, Any] = {}
 
     def do_GET(self) -> None:
@@ -39,7 +42,9 @@ class CapturingHandler(BaseHTTPRequestHandler):
         return
 
     def _write_response(self) -> None:
-        payload = json.dumps(type(self).response_body).encode("utf-8")
+        payload = type(self).response_payload
+        if payload is None:
+            payload = json.dumps(type(self).response_body).encode("utf-8")
         self.send_response(type(self).response_status)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(payload)))
@@ -51,6 +56,7 @@ class RuntimeApiClientHttpTest(unittest.TestCase):
     def setUp(self) -> None:
         CapturingHandler.response_status = 200
         CapturingHandler.response_body = {"success": True, "engine": "java", "data": {"ok": True}}
+        CapturingHandler.response_payload = None
         CapturingHandler.captured = {}
         self.server = ThreadingHTTPServer(("127.0.0.1", 0), CapturingHandler)
         self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
@@ -103,6 +109,70 @@ class RuntimeApiClientHttpTest(unittest.TestCase):
 
         self.assertFalse(response["success"])
         self.assertEqual("FIELD_NOT_FOUND", response["error"]["code"])
+
+    def test_empty_response_returns_empty_dict(self) -> None:
+        CapturingHandler.response_payload = b""
+        client = RuntimeApiClient(self.base_url, timeout=5)
+
+        response = client.request("GET", "/api/v1/capabilities")
+
+        self.assertEqual({}, response)
+
+    def test_invalid_json_response_raises_transport_error(self) -> None:
+        CapturingHandler.response_payload = b"not-json"
+        client = RuntimeApiClient(self.base_url, timeout=5)
+
+        with self.assertRaises(RuntimeTransportError) as raised:
+            client.request("GET", "/api/v1/capabilities")
+
+        self.assertIn("Invalid JSON response", str(raised.exception))
+
+    def test_non_object_response_raises_transport_error(self) -> None:
+        CapturingHandler.response_payload = b"[]"
+        client = RuntimeApiClient(self.base_url, timeout=5)
+
+        with self.assertRaises(RuntimeTransportError) as raised:
+            client.request("GET", "/api/v1/capabilities")
+
+        self.assertIn("is not a JSON object", str(raised.exception))
+
+    def test_http_error_with_invalid_json_raises_transport_error(self) -> None:
+        CapturingHandler.response_status = 500
+        CapturingHandler.response_payload = b"<html>server error</html>"
+        client = RuntimeApiClient(self.base_url, timeout=5)
+
+        with self.assertRaises(RuntimeTransportError) as raised:
+            client.request("GET", "/api/v1/capabilities")
+
+        self.assertIn("HTTP 500", str(raised.exception))
+
+    def test_http_error_with_json_array_raises_transport_error(self) -> None:
+        CapturingHandler.response_status = 500
+        CapturingHandler.response_payload = b"[]"
+        client = RuntimeApiClient(self.base_url, timeout=5)
+
+        with self.assertRaises(RuntimeTransportError) as raised:
+            client.request("GET", "/api/v1/capabilities")
+
+        self.assertIn("response is not a JSON object", str(raised.exception))
+
+    def test_url_error_raises_transport_error(self) -> None:
+        client = RuntimeApiClient(self.base_url, timeout=5)
+
+        with patch("foggy_runtime_cli.client.urlopen", side_effect=URLError("connection refused")):
+            with self.assertRaises(RuntimeTransportError) as raised:
+                client.request("GET", "/api/v1/capabilities")
+
+        self.assertIn("connection refused", str(raised.exception))
+
+    def test_os_error_raises_transport_error(self) -> None:
+        client = RuntimeApiClient(self.base_url, timeout=5)
+
+        with patch("foggy_runtime_cli.client.urlopen", side_effect=OSError("broken pipe")):
+            with self.assertRaises(RuntimeTransportError) as raised:
+                client.request("GET", "/api/v1/capabilities")
+
+        self.assertIn("broken pipe", str(raised.exception))
 
 
 if __name__ == "__main__":
