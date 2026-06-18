@@ -41,6 +41,18 @@ def main(
 
     base_url = resolve_base_url(args)
     client = client_factory(base_url, args.namespace, args.timeout)
+    required_capabilities = required_capabilities_for(args)
+    if required_capabilities:
+        try:
+            capability_response = client.request("GET", "/api/v1/capabilities", None)
+        except RuntimeTransportError as exc:
+            print(f"transport error: {exc}", file=stderr)
+            return EXIT_TRANSPORT_ERROR
+        unsupported_response = unsupported_capability_response(capability_response, required_capabilities)
+        if unsupported_response is not None:
+            render_response(unsupported_response, args.output, stdout)
+            return exit_code_for_response(unsupported_response)
+
     try:
         response = client.request(args.method, args.path, body)
     except RuntimeTransportError as exc:
@@ -106,6 +118,53 @@ def build_parser() -> argparse.ArgumentParser:
     query_execute.add_argument("--payload", required=True)
     query_execute.set_defaults(method="POST", body_builder=query_payload_body, query_action="execute")
 
+    compose = subparsers.add_parser("compose")
+    compose_commands = compose.add_subparsers(dest="compose_command", required=True)
+
+    compose_validate = compose_commands.add_parser("validate")
+    add_script_request_arguments(compose_validate)
+    compose_validate.set_defaults(
+        method="POST",
+        path="/api/v1/compose/validate",
+        body_builder=compose_script_body,
+        required_capabilities=["compose.validate"],
+    )
+
+    compose_preview = compose_commands.add_parser("preview")
+    add_script_request_arguments(compose_preview)
+    compose_preview.set_defaults(
+        method="POST",
+        path="/api/v1/compose/preview",
+        body_builder=compose_script_body,
+        required_capabilities=["compose.preview"],
+    )
+
+    compose_execute = compose_commands.add_parser("execute")
+    add_script_request_arguments(compose_execute)
+    compose_execute.set_defaults(
+        method="POST",
+        path="/api/v1/compose/execute",
+        body_builder=compose_script_body,
+        required_capabilities=["compose.execute"],
+    )
+
+    fsscript = subparsers.add_parser("fsscript")
+    fsscript_commands = fsscript.add_subparsers(dest="fsscript_command", required=True)
+
+    fsscript_run = fsscript_commands.add_parser("run")
+    add_script_request_arguments(fsscript_run)
+    fsscript_run.add_argument(
+        "--enable-cte-bridge",
+        action="store_true",
+        help="Request host-injected foggy.cte.* access when the runtime supports it.",
+    )
+    fsscript_run.set_defaults(
+        method="POST",
+        path="/api/v1/fsscript/execute",
+        body_builder=fsscript_body,
+        required_capabilities=["fsscript.execute"],
+    )
+
     tables = subparsers.add_parser("tables")
     table_commands = tables.add_subparsers(dest="tables_command", required=True)
 
@@ -121,6 +180,14 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 _BODY_ERROR = object()
+
+
+def add_script_request_arguments(parser: argparse.ArgumentParser) -> None:
+    source = parser.add_mutually_exclusive_group(required=True)
+    source.add_argument("--script", help="Path to script file, or '-' for stdin.")
+    source.add_argument("--script-text", help="Inline script source.")
+    parser.add_argument("--params", help="Path to JSON object params file, or '-' for stdin.")
+    parser.add_argument("--options", help="Path to JSON object options file, or '-' for stdin.")
 
 
 def resolve_base_url(args: argparse.Namespace) -> str:
@@ -202,6 +269,40 @@ def table_inspect_body(args: argparse.Namespace, _stdin: TextIO) -> dict[str, An
     return body
 
 
+def compose_script_body(args: argparse.Namespace, stdin: TextIO) -> dict[str, Any]:
+    body = script_body(args, stdin)
+    return body
+
+
+def fsscript_body(args: argparse.Namespace, stdin: TextIO) -> dict[str, Any]:
+    body = script_body(args, stdin)
+    if args.enable_cte_bridge:
+        body["capabilities"] = {"cteBridge": True}
+    return body
+
+
+def script_body(args: argparse.Namespace, stdin: TextIO) -> dict[str, Any]:
+    body: dict[str, Any] = {
+        "script": read_script_source(args, stdin),
+    }
+    if args.namespace:
+        body["namespace"] = args.namespace
+    if args.params:
+        body["params"] = read_json_payload(args.params, stdin)
+    if args.options:
+        body["options"] = read_json_payload(args.options, stdin)
+    return body
+
+
+def read_script_source(args: argparse.Namespace, stdin: TextIO) -> str:
+    if args.script_text is not None:
+        return args.script_text
+    if args.script == "-":
+        return stdin.read()
+    with open(args.script, "r", encoding="utf-8") as handle:
+        return handle.read()
+
+
 def read_json_payload(payload_ref: str, stdin: TextIO) -> dict[str, Any]:
     if payload_ref == "-":
         raw = stdin.read()
@@ -217,6 +318,53 @@ def read_json_payload(payload_ref: str, stdin: TextIO) -> dict[str, Any]:
     if not isinstance(payload, dict):
         raise ValueError(f"{source} must contain a JSON object")
     return payload
+
+
+def required_capabilities_for(args: argparse.Namespace) -> list[str]:
+    capabilities = list(getattr(args, "required_capabilities", []) or [])
+    if getattr(args, "enable_cte_bridge", False):
+        capabilities.append("fsscript.cteBridge")
+    return capabilities
+
+
+def unsupported_capability_response(
+    capability_response: dict[str, Any],
+    required_capabilities: list[str],
+) -> dict[str, Any] | None:
+    if capability_response.get("success") is not True:
+        return capability_response
+    data = capability_response.get("data")
+    capabilities = data.get("capabilities") if isinstance(data, dict) else None
+    if not isinstance(capabilities, dict):
+        return unsupported_response(capability_response, required_capabilities[0], "missing")
+    for capability in required_capabilities:
+        state = capabilities.get(capability)
+        if state != "supported":
+            return unsupported_response(capability_response, capability, state)
+    return None
+
+
+def unsupported_response(
+    capability_response: dict[str, Any],
+    capability: str,
+    state: Any,
+) -> dict[str, Any]:
+    engine = capability_response.get("engine", "unknown")
+    runtime_api_version = capability_response.get("runtimeApiVersion")
+    response: dict[str, Any] = {
+        "success": False,
+        "engine": engine,
+        "data": None,
+        "error": {
+            "code": "UNSUPPORTED_OPERATION",
+            "phase": capability,
+            "message": f"Capability {capability} is not supported by the connected runtime (state={state}).",
+            "safeToAutoRepair": False,
+        },
+    }
+    if runtime_api_version is not None:
+        response["runtimeApiVersion"] = runtime_api_version
+    return response
 
 
 def render_response(response: dict[str, Any], output: str, stdout: TextIO) -> None:

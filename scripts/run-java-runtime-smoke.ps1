@@ -8,6 +8,7 @@ param(
     [string]$TableName = "fact_order",
     [string]$ModelsDir = "",
     [string]$QueryPayload = "",
+    [string]$ComposePayload = "",
     [int]$ReadyTimeoutSeconds = 90,
     [switch]$Build,
     [switch]$ReuseExisting,
@@ -175,6 +176,54 @@ function Test-CliJsonOutput {
                 return "query.execute returned no items."
             }
         }
+        "compose-validate" {
+            return Test-ComposeOutput -Body $body -Mode "validate"
+        }
+        "compose-preview" {
+            $message = Test-ComposeOutput -Body $body -Mode "preview"
+            if ($message) {
+                return $message
+            }
+            $json = $body.data | ConvertTo-Json -Depth 20 -Compress
+            if ($json -notmatch "sql") {
+                return "compose.preview did not expose SQL evidence."
+            }
+        }
+        "compose-execute" {
+            return Test-ComposeOutput -Body $body -Mode "execute"
+        }
+        "fsscript-run" {
+            if ($body.data.valid -ne $true) {
+                return "fsscript.run data.valid is not true."
+            }
+            if ($body.data.scriptKind -ne "fsscript") {
+                return "fsscript.run scriptKind is $($body.data.scriptKind)."
+            }
+            if ($body.data.mode -ne "execute") {
+                return "fsscript.run mode is $($body.data.mode)."
+            }
+            if ([int]$body.data.value -ne 3) {
+                return "fsscript.run value is $($body.data.value), expected 3."
+            }
+        }
+        "fsscript-cte-bridge-preview" {
+            if ($body.data.valid -ne $true) {
+                return "fsscript CTE bridge data.valid is not true."
+            }
+            if ($body.data.scriptKind -ne "fsscript") {
+                return "fsscript CTE bridge scriptKind is $($body.data.scriptKind)."
+            }
+            if ($body.data.value.scriptKind -ne "compose") {
+                return "fsscript CTE bridge nested scriptKind is $($body.data.value.scriptKind)."
+            }
+            if ($body.data.value.mode -ne "preview") {
+                return "fsscript CTE bridge nested mode is $($body.data.value.mode)."
+            }
+            $json = $body.data.value | ConvertTo-Json -Depth 20 -Compress
+            if ($json -notmatch "sql") {
+                return "fsscript CTE bridge preview did not expose nested SQL evidence."
+            }
+        }
         "tables-inspect" {
             if ($body.data.table -ne $TableName) {
                 return "tables.inspect returned table $($body.data.table), expected $TableName."
@@ -185,6 +234,24 @@ function Test-CliJsonOutput {
         }
     }
 
+    return ""
+}
+
+function Test-ComposeOutput {
+    param(
+        [object]$Body,
+        [string]$Mode
+    )
+
+    if ($Body.data.valid -ne $true) {
+        return "compose.$Mode data.valid is not true."
+    }
+    if ($Body.data.scriptKind -ne "compose") {
+        return "compose.$Mode scriptKind is $($Body.data.scriptKind)."
+    }
+    if ($Body.data.mode -ne $Mode) {
+        return "compose.$Mode mode is $($Body.data.mode)."
+    }
     return ""
 }
 
@@ -203,7 +270,19 @@ function Test-CapabilitiesOutput {
     if ($Body.data.securityMode -ne "none-dev-test-only") {
         return "capabilities securityMode is $($Body.data.securityMode)."
     }
-    foreach ($capability in @("models.refresh", "models.validate", "models.describe", "query.validate", "query.execute", "tables.inspect")) {
+    foreach ($capability in @(
+        "models.refresh",
+        "models.validate",
+        "models.describe",
+        "query.validate",
+        "query.execute",
+        "tables.inspect",
+        "compose.validate",
+        "compose.preview",
+        "compose.execute",
+        "fsscript.execute",
+        "fsscript.cteBridge"
+    )) {
         $value = $Body.data.capabilities.PSObject.Properties[$capability].Value
         if ($value -ne "supported") {
             return "capability $capability is $value."
@@ -242,6 +321,9 @@ if (-not $ModelsDir) {
 if (-not $QueryPayload) {
     $QueryPayload = Resolve-DefaultPath -Base $RepoRoot -Relative "docs\v4.1\contracts\runtime-api-v1\fixtures\query-fact-order-valid.json"
 }
+if (-not $ComposePayload) {
+    $ComposePayload = Resolve-DefaultPath -Base $RepoRoot -Relative "docs\v4.1\contracts\runtime-api-v1\fixtures\compose-fact-order-request.json"
+}
 
 $CliSrc = Resolve-DefaultPath -Base $RepoRoot -Relative "foggy-runtime-cli\src"
 $launcherTarget = Resolve-DefaultPath -Base $JavaRoot -Relative "foggy-mcp-launcher\target"
@@ -267,8 +349,18 @@ try {
     if (-not (Test-Path $QueryPayload)) {
         throw "QueryPayload not found: $QueryPayload"
     }
+    if (-not (Test-Path $ComposePayload)) {
+        throw "ComposePayload not found: $ComposePayload"
+    }
 
     $env:PYTHONPATH = if ($oldPythonPath) { "$CliSrc;$oldPythonPath" } else { $CliSrc }
+    $composeFixture = Get-Content $ComposePayload -Raw | ConvertFrom-Json
+    $composeScript = [string]$composeFixture.script
+    if (-not $composeScript) {
+        throw "ComposePayload does not contain script: $ComposePayload"
+    }
+    $composeScriptJson = $composeScript | ConvertTo-Json -Compress
+    $fsscriptCteBridgeScript = "return foggy.cte.preview({script: $composeScriptJson});"
 
     if ($Build) {
         Push-Location $JavaRoot
@@ -339,6 +431,11 @@ try {
     $results += Invoke-CliCommand -Name "models-describe" -Arguments @("models", "describe", $ModelName)
     $results += Invoke-CliCommand -Name "query-validate" -Arguments @("query", "validate", $ModelName, "--payload", $QueryPayload)
     $results += Invoke-CliCommand -Name "query-execute" -Arguments @("query", "execute", $ModelName, "--payload", $QueryPayload)
+    $results += Invoke-CliCommand -Name "compose-validate" -Arguments @("compose", "validate", "--script-text", $composeScript)
+    $results += Invoke-CliCommand -Name "compose-preview" -Arguments @("compose", "preview", "--script-text", $composeScript)
+    $results += Invoke-CliCommand -Name "compose-execute" -Arguments @("compose", "execute", "--script-text", $composeScript)
+    $results += Invoke-CliCommand -Name "fsscript-run" -Arguments @("fsscript", "run", "--script-text", "return 1 + 2;")
+    $results += Invoke-CliCommand -Name "fsscript-cte-bridge-preview" -Arguments @("fsscript", "run", "--script-text", $fsscriptCteBridgeScript, "--enable-cte-bridge")
     $results += Invoke-CliCommand -Name "tables-inspect" -Arguments @("tables", "inspect", "--table", $TableName, "--include-indexes")
 
     $summary = [pscustomobject]@{
@@ -352,6 +449,7 @@ try {
         tableName = $TableName
         modelsDir = $ModelsDir
         queryPayload = $QueryPayload
+        composePayload = $ComposePayload
         results = $results
     }
     $summary | ConvertTo-Json -Depth 8 | Out-File -FilePath $summaryPath -Encoding utf8

@@ -22,6 +22,7 @@ from foggy_runtime_cli.main import (
 class FakeClient:
     calls: list[tuple[str, str, dict[str, Any] | None]]
     response: dict[str, Any] = {"success": True, "engine": "java", "data": {}}
+    responses: list[dict[str, Any]] | None = None
     raise_error: Exception | None = None
     init_args: tuple[str, str | None, float] | None = None
 
@@ -32,6 +33,8 @@ class FakeClient:
         if type(self).raise_error is not None:
             raise type(self).raise_error
         type(self).calls.append((method, path, body))
+        if type(self).responses is not None:
+            return type(self).responses.pop(0)
         return type(self).response
 
 
@@ -39,6 +42,7 @@ class CliTest(unittest.TestCase):
     def setUp(self) -> None:
         FakeClient.calls = []
         FakeClient.response = {"success": True, "engine": "java", "data": {}}
+        FakeClient.responses = None
         FakeClient.raise_error = None
         FakeClient.init_args = None
 
@@ -249,6 +253,137 @@ class CliTest(unittest.TestCase):
                         "includeForeignKeys": True,
                     },
                 )
+            ],
+            FakeClient.calls,
+        )
+
+    def test_compose_validate_reads_script_file_and_checks_capability(self) -> None:
+        FakeClient.responses = [
+            {
+                "success": True,
+                "engine": "java",
+                "runtimeApiVersion": "foggy-runtime-api/v1",
+                "data": {"capabilities": {"compose.validate": "supported"}},
+            },
+            {"success": True, "engine": "java", "data": {"valid": True}},
+        ]
+        with tempfile.TemporaryDirectory() as temp_dir:
+            script_path = Path(temp_dir) / "compose.fsscript"
+            params_path = Path(temp_dir) / "params.json"
+            script_path.write_text("return { plans: [] };", encoding="utf-8")
+            params_path.write_text(json.dumps({"region": "east"}), encoding="utf-8")
+
+            code, _output, error = self.run_cli(
+                [
+                    "--namespace",
+                    "dev",
+                    "compose",
+                    "validate",
+                    "--script",
+                    str(script_path),
+                    "--params",
+                    str(params_path),
+                ]
+            )
+
+        self.assertEqual(EXIT_OK, code)
+        self.assertEqual("", error)
+        self.assertEqual(
+            [
+                ("GET", "/api/v1/capabilities", None),
+                (
+                    "POST",
+                    "/api/v1/compose/validate",
+                    {
+                        "script": "return { plans: [] };",
+                        "namespace": "dev",
+                        "params": {"region": "east"},
+                    },
+                ),
+            ],
+            FakeClient.calls,
+        )
+
+    def test_compose_preview_unsupported_capability_stops_before_route(self) -> None:
+        FakeClient.responses = [
+            {
+                "success": True,
+                "engine": "python",
+                "runtimeApiVersion": "foggy-runtime-api/v1",
+                "data": {"capabilities": {"compose.preview": "unsupported"}},
+            }
+        ]
+
+        code, output, error = self.run_cli(
+            ["compose", "preview", "--script-text", "return { plans: [] };"]
+        )
+
+        self.assertEqual(EXIT_UNSUPPORTED, code)
+        self.assertEqual("", error)
+        self.assertEqual([("GET", "/api/v1/capabilities", None)], FakeClient.calls)
+        self.assertIn('"code": "UNSUPPORTED_OPERATION"', output)
+        self.assertIn('"phase": "compose.preview"', output)
+
+    def test_fsscript_run_routes_to_execute(self) -> None:
+        FakeClient.responses = [
+            {
+                "success": True,
+                "engine": "java",
+                "runtimeApiVersion": "foggy-runtime-api/v1",
+                "data": {"capabilities": {"fsscript.execute": "supported"}},
+            },
+            {"success": True, "engine": "java", "data": {"value": 3}},
+        ]
+
+        code, _output, _error = self.run_cli(["fsscript", "run", "--script-text", "return 1 + 2;"])
+
+        self.assertEqual(EXIT_OK, code)
+        self.assertEqual(
+            [
+                ("GET", "/api/v1/capabilities", None),
+                ("POST", "/api/v1/fsscript/execute", {"script": "return 1 + 2;"}),
+            ],
+            FakeClient.calls,
+        )
+
+    def test_fsscript_run_with_cte_bridge_requires_bridge_capability(self) -> None:
+        FakeClient.responses = [
+            {
+                "success": True,
+                "engine": "java",
+                "runtimeApiVersion": "foggy-runtime-api/v1",
+                "data": {
+                    "capabilities": {
+                        "fsscript.execute": "supported",
+                        "fsscript.cteBridge": "supported",
+                    }
+                },
+            },
+            {"success": True, "engine": "java", "data": {"value": {"mode": "preview"}}},
+        ]
+
+        code, _output, _error = self.run_cli(
+            [
+                "fsscript",
+                "run",
+                "--script-text",
+                "return foggy.cte.preview({script: 'return { plans: [] };'});",
+                "--enable-cte-bridge",
+            ]
+        )
+
+        self.assertEqual(EXIT_OK, code)
+        self.assertEqual(
+            [
+                ("GET", "/api/v1/capabilities", None),
+                (
+                    "POST",
+                    "/api/v1/fsscript/execute",
+                    {
+                        "script": "return foggy.cte.preview({script: 'return { plans: [] };'});",
+                        "capabilities": {"cteBridge": True},
+                    },
+                ),
             ],
             FakeClient.calls,
         )

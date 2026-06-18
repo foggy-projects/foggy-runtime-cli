@@ -14,6 +14,11 @@ foggy-runtime models refresh --model FactSalesQueryModel
 foggy-runtime models validate --models-dir ./models
 foggy-runtime query validate FactSalesQueryModel --payload query.json
 foggy-runtime query execute FactSalesQueryModel --payload -
+foggy-runtime compose validate --script compose.fsscript
+foggy-runtime compose preview --script compose.fsscript
+foggy-runtime compose execute --script compose.fsscript
+foggy-runtime fsscript run --script workflow.fsscript
+foggy-runtime fsscript run --script workflow.fsscript --enable-cte-bridge
 foggy-runtime tables inspect --table sale_order --schema public --include-indexes
 ```
 
@@ -39,5 +44,9 @@ capabilities:
 Automation and Skills should keep using JSON output so they can validate the full envelope and diagnostics.
 
 `models validate` sends `clearExisting=true` by default so repeated validation runs replace the temporary runtime validation bundle. Use `--no-clear-existing` only when debugging bundle watch behavior.
+
+`compose validate|preview|execute` and `fsscript run` read `--script <path>` or `--script -`; use `--script-text` only for short inline smoke checks. These commands preflight `capabilities` and stop with exit code `3` when the connected Runtime API does not support the required capability.
+
+`fsscript run` does not expose `foggy.cte.*` by default. Use `--enable-cte-bridge` only for dev/test Runtime API sessions where `fsscript.cteBridge` is supported and the script intentionally calls restricted Compose/CTE through the host-injected bridge.
 
 When validating copied fixtures, confirm the runtime datasource first. For the Java `lite` profile, use `docs/v4.1/contracts/runtime-api-v1/model-fixtures/minimal-fact-order` as the default smoke fixture; the broader ecommerce demo directory requires a fuller schema and is expected to fail under lite.
