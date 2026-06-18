@@ -257,6 +257,42 @@ class CliTest(unittest.TestCase):
             FakeClient.calls,
         )
 
+    def test_demo_sales_drop_plan_is_local(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            repo_root = Path(temp_dir)
+            demo_dir = repo_root / ".codex" / "skills" / "foggy-ai-analysis-demo" / "assets" / "sales-drop-demo"
+            (demo_dir / "models").mkdir(parents=True)
+            (demo_dir / "queries").mkdir()
+            (demo_dir / "schema.sql").write_text("create table sales_drop_daily(id integer);", encoding="utf-8")
+            (demo_dir / "data.sql").write_text("insert into sales_drop_daily values (1);", encoding="utf-8")
+            (demo_dir / "queries" / "basic.json").write_text(json.dumps({"limit": 1}), encoding="utf-8")
+
+            code, output, error = self.run_cli(
+                ["demo", "sales-drop", "plan", "--repo-root", str(repo_root), "--port", "18066"]
+            )
+
+        payload = json.loads(output)
+        self.assertEqual(EXIT_OK, code)
+        self.assertEqual("", error)
+        self.assertEqual([], FakeClient.calls)
+        self.assertTrue(payload["success"])
+        self.assertEqual("local", payload["engine"])
+        self.assertEqual("sales-drop", payload["data"]["demo"])
+        self.assertEqual("http://127.0.0.1:18066", payload["data"]["baseUrl"])
+        self.assertEqual("default", payload["data"]["namespace"])
+        self.assertIn("commands", payload["data"])
+
+    def test_demo_sales_drop_plan_reports_missing_assets(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            code, output, error = self.run_cli(["demo", "sales-drop", "plan", "--repo-root", temp_dir])
+
+        payload = json.loads(output)
+        self.assertEqual(EXIT_API_ERROR, code)
+        self.assertEqual("", error)
+        self.assertEqual([], FakeClient.calls)
+        self.assertFalse(payload["success"])
+        self.assertEqual("DEMO_ASSET_MISSING", payload["error"]["code"])
+
     def test_compose_validate_reads_script_file_and_checks_capability(self) -> None:
         FakeClient.responses = [
             {

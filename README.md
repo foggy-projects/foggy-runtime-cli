@@ -20,6 +20,7 @@ foggy-runtime compose execute --script compose.fsscript
 foggy-runtime fsscript run --script workflow.fsscript
 foggy-runtime fsscript run --script workflow.fsscript --enable-cte-bridge
 foggy-runtime tables inspect --table sale_order --schema public --include-indexes
+foggy-runtime demo sales-drop plan --repo-root D:\foggy-projects\foggy-data-mcp --port 18066
 ```
 
 JSON output is the default and preserves the Runtime API envelope for Skill consumption.
@@ -50,3 +51,19 @@ Automation and Skills should keep using JSON output so they can validate the ful
 `fsscript run` does not expose `foggy.cte.*` by default. Use `--enable-cte-bridge` only for dev/test Runtime API sessions where `fsscript.cteBridge` is supported and the script intentionally calls restricted Compose/CTE through the host-injected bridge.
 
 When validating copied fixtures, confirm the runtime datasource first. For the Java `lite` profile, use `docs/v4.1/contracts/runtime-api-v1/model-fixtures/minimal-fact-order` as the default smoke fixture; the broader ecommerce demo directory requires a fuller schema and is expected to fail under lite.
+
+## Local Demo Planning
+
+`demo sales-drop plan` is a local planning helper for the `foggy-ai-analysis-demo` skill. It does not call Runtime API endpoints or Java/Python private routes. It verifies that the bundled sales-drop skill assets exist, then emits a JSON command plan for:
+
+- SQLite schema/data seeding.
+- Java lite runtime startup.
+- `capabilities`.
+- `tables inspect`.
+- `models validate`.
+- `models refresh`.
+- `models describe`.
+- `query validate`.
+- `query execute`.
+
+If the launcher JAR is missing, the command still returns a plan with a warning so a clean workspace can tell the user to build `foggy-mcp-launcher` or pass `--launcher-jar`.

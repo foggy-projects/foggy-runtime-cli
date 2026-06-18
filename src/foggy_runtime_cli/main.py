@@ -4,6 +4,7 @@ import argparse
 import json
 import os
 import sys
+from pathlib import Path
 from typing import Any, Callable, TextIO
 
 from .client import RuntimeApiClient, RuntimeTransportError, path_quote
@@ -34,6 +35,12 @@ def main(
 
     parser = build_parser()
     args = parser.parse_args(argv)
+
+    local_handler = getattr(args, "local_handler", None)
+    if local_handler is not None:
+        response = local_handler(args)
+        render_response(response, args.output, stdout)
+        return exit_code_for_response(response)
 
     body = build_body(args, stdin, stderr)
     if body is _BODY_ERROR:
@@ -175,6 +182,30 @@ def build_parser() -> argparse.ArgumentParser:
     inspect.add_argument("--include-indexes", action="store_true")
     inspect.add_argument("--include-foreign-keys", action="store_true")
     inspect.set_defaults(method="POST", path="/api/v1/tables/inspect", body_builder=table_inspect_body)
+
+    demo = subparsers.add_parser("demo")
+    demo_commands = demo.add_subparsers(dest="demo_command", required=True)
+
+    sales_drop = demo_commands.add_parser("sales-drop")
+    sales_drop_commands = sales_drop.add_subparsers(dest="sales_drop_command", required=True)
+
+    sales_drop_plan = sales_drop_commands.add_parser("plan")
+    sales_drop_plan.add_argument(
+        "--repo-root",
+        default=os.getcwd(),
+        help="Workspace root containing the demo skill.",
+    )
+    sales_drop_plan.add_argument(
+        "--port",
+        type=int,
+        default=18066,
+        help="Local runtime port used in generated commands.",
+    )
+    sales_drop_plan.add_argument("--sqlite-path", help="SQLite database path used in generated commands.")
+    sales_drop_plan.add_argument("--launcher-jar", help="Foggy MCP launcher jar path used in generated commands.")
+    sales_drop_plan.add_argument("--models-dir", help="Sales-drop TM/QM model directory.")
+    sales_drop_plan.add_argument("--query-payload", help="Sales-drop query payload path.")
+    sales_drop_plan.set_defaults(local_handler=demo_sales_drop_plan)
 
     return parser
 
@@ -318,6 +349,171 @@ def read_json_payload(payload_ref: str, stdin: TextIO) -> dict[str, Any]:
     if not isinstance(payload, dict):
         raise ValueError(f"{source} must contain a JSON object")
     return payload
+
+
+def demo_sales_drop_plan(args: argparse.Namespace) -> dict[str, Any]:
+    repo_root = Path(args.repo_root).resolve()
+    skill_dir = repo_root / ".codex" / "skills" / "foggy-ai-analysis-demo"
+    demo_dir = skill_dir / "assets" / "sales-drop-demo"
+    schema = demo_dir / "schema.sql"
+    data = demo_dir / "data.sql"
+    models_dir = Path(args.models_dir).resolve() if args.models_dir else demo_dir / "models"
+    query_payload = (
+        Path(args.query_payload).resolve()
+        if args.query_payload
+        else demo_dir / "queries" / "basic.json"
+    )
+    sqlite_path = (
+        Path(args.sqlite_path).resolve()
+        if args.sqlite_path
+        else repo_root / ".codex-tmp" / "foggy-ai-analysis-demo" / "sales-drop" / "foggy_mcp_lite.db"
+    )
+    launcher_jar = (
+        Path(args.launcher_jar).resolve()
+        if args.launcher_jar
+        else repo_root
+        / "foggy-data-mcp-bridge-wt-dev-compose"
+        / "foggy-mcp-launcher"
+        / "target"
+        / "foggy-mcp-launcher-9.1.0.beta.jar"
+    )
+    base_url = resolve_base_url(args) if args.base_url else f"http://127.0.0.1:{args.port}"
+    namespace = args.namespace or "default"
+
+    required_assets = {
+        "skill": skill_dir,
+        "schema": schema,
+        "data": data,
+        "modelsDir": models_dir,
+        "queryPayload": query_payload,
+    }
+    missing_assets = [name for name, path in required_assets.items() if not path.exists()]
+    if missing_assets:
+        return {
+            "success": False,
+            "engine": "local",
+            "data": {
+                "repoRoot": str(repo_root),
+                "missingAssets": missing_assets,
+            },
+            "error": {
+                "code": "DEMO_ASSET_MISSING",
+                "phase": "demo.sales-drop.plan",
+                "message": "Required sales-drop demo assets are missing.",
+                "safeToAutoRepair": False,
+            },
+        }
+
+    start_command = [
+        "java",
+        "-Dfile.encoding=UTF-8",
+        "-jar",
+        str(launcher_jar),
+        f"--server.port={args.port}",
+        "--spring.profiles.active=lite",
+        "--foggy.runtime-api.enabled=true",
+        "--foggy.data-viewer.enabled=false",
+        "--foggy.mcp.audit.enabled=false",
+        f"--spring.datasource.url=jdbc:sqlite:{sqlite_path}",
+        "--spring.ai.openai.api-key=sk-runtime-demo",
+        "--spring.ai.openai.base-url=http://127.0.0.1:9",
+        "--spring.ai.openai.chat.options.model=runtime-demo",
+    ]
+
+    cli_base = [
+        "python",
+        "-m",
+        "foggy_runtime_cli.main",
+        "--base-url",
+        base_url,
+        "--namespace",
+        namespace,
+    ]
+    commands = [
+        {
+            "name": "create-demo-db-dir",
+            "argv": [
+                "powershell",
+                "New-Item",
+                "-ItemType",
+                "Directory",
+                "-Force",
+                "-Path",
+                str(sqlite_path.parent),
+            ],
+        },
+        {"name": "seed-schema", "argv": ["sqlite3", str(sqlite_path), f".read {schema}"]},
+        {"name": "seed-data", "argv": ["sqlite3", str(sqlite_path), f".read {data}"]},
+        {"name": "start-runtime", "argv": start_command},
+        {"name": "capabilities", "argv": [*cli_base, "capabilities"]},
+        {
+            "name": "table-inspect",
+            "argv": [
+                *cli_base,
+                "tables",
+                "inspect",
+                "--table",
+                "sales_drop_daily",
+                "--include-indexes",
+            ],
+        },
+        {
+            "name": "models-validate",
+            "argv": [*cli_base, "models", "validate", "--models-dir", str(models_dir)],
+        },
+        {
+            "name": "models-refresh",
+            "argv": [*cli_base, "models", "refresh", "--model", "SalesDropDailyQueryModel"],
+        },
+        {"name": "models-describe", "argv": [*cli_base, "models", "describe", "SalesDropDailyQueryModel"]},
+        {
+            "name": "query-validate",
+            "argv": [
+                *cli_base,
+                "query",
+                "validate",
+                "SalesDropDailyQueryModel",
+                "--payload",
+                str(query_payload),
+            ],
+        },
+        {
+            "name": "query-execute",
+            "argv": [
+                *cli_base,
+                "query",
+                "execute",
+                "SalesDropDailyQueryModel",
+                "--payload",
+                str(query_payload),
+            ],
+        },
+    ]
+
+    warnings = []
+    if not launcher_jar.exists():
+        warnings.append(
+            "Launcher JAR was not found. Build foggy-mcp-launcher first or pass --launcher-jar."
+        )
+
+    return {
+        "success": True,
+        "engine": "local",
+        "data": {
+            "demo": "sales-drop",
+            "repoRoot": str(repo_root),
+            "baseUrl": base_url,
+            "namespace": namespace,
+            "port": args.port,
+            "sqlitePath": str(sqlite_path),
+            "launcherJar": str(launcher_jar),
+            "modelsDir": str(models_dir),
+            "queryPayload": str(query_payload),
+            "runtimeSecurityMode": "none-dev-test-only",
+            "warnings": warnings,
+            "commands": commands,
+        },
+    }
 
 
 def required_capabilities_for(args: argparse.Namespace) -> list[str]:
