@@ -67,6 +67,17 @@ When validating copied fixtures, confirm the runtime datasource first. For the J
 
 ## Local Demo Planning
 
+Before starting the full local demo replay, run the preflight:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File foggy-runtime-cli\scripts\verify-foggy-ai-analysis-demo.ps1 `
+  -RepoRoot D:\foggy-projects\foggy-data-mcp `
+  -Port 18066 `
+  -Namespace salesdrop
+```
+
+The preflight checks Java/Python availability, source-layout CLI import, bundled Skill assets, optional Skill validation, launcher JAR presence, port availability, and the local sales-drop command plan. It does not start Java.
+
 `demo sales-drop plan` is a local planning helper for the `foggy-ai-analysis-demo` skill. It does not call Runtime API endpoints or Java/Python private routes. It verifies that the bundled sales-drop skill assets exist, then emits a JSON command plan for:
 
 - SQLite schema/data seeding.
