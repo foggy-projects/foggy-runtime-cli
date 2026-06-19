@@ -421,6 +421,188 @@ class CliTest(unittest.TestCase):
         self.assertIn('"code": "UNSUPPORTED_OPERATION"', output)
         self.assertIn('"phase": "bundles.add"', output)
 
+    def test_datasources_list_checks_capability(self) -> None:
+        FakeClient.responses = [
+            {
+                "success": True,
+                "engine": "java",
+                "runtimeApiVersion": "foggy-runtime-api/v1",
+                "data": {"capabilities": {"datasources.list": "supported"}},
+            },
+            {"success": True, "engine": "java", "data": {"datasources": []}},
+        ]
+
+        code, _output, error = self.run_cli(["datasources", "list"])
+
+        self.assertEqual(EXIT_OK, code)
+        self.assertEqual("", error)
+        self.assertEqual(
+            [
+                ("GET", "/api/v1/capabilities", None),
+                ("GET", "/api/v1/datasources", None),
+            ],
+            FakeClient.calls,
+        )
+
+    def test_datasources_add_body(self) -> None:
+        FakeClient.responses = [
+            {
+                "success": True,
+                "engine": "java",
+                "runtimeApiVersion": "foggy-runtime-api/v1",
+                "data": {"capabilities": {"datasources.add": "supported"}},
+            },
+            {"success": True, "engine": "java", "data": {"datasource": {"name": "sales-sqlite"}}},
+        ]
+
+        code, _output, error = self.run_cli(
+            [
+                "datasources",
+                "add",
+                "--name",
+                "sales-sqlite",
+                "--type",
+                "sqlite",
+                "--jdbc-url",
+                "jdbc:sqlite:./sales.db",
+                "--replace",
+            ]
+        )
+
+        self.assertEqual(EXIT_OK, code)
+        self.assertEqual("", error)
+        self.assertEqual(
+            [
+                ("GET", "/api/v1/capabilities", None),
+                (
+                    "POST",
+                    "/api/v1/datasources",
+                    {
+                        "name": "sales-sqlite",
+                        "type": "sqlite",
+                        "jdbcUrl": "jdbc:sqlite:./sales.db",
+                        "replace": True,
+                        "enabled": True,
+                    },
+                ),
+            ],
+            FakeClient.calls,
+        )
+
+    def test_datasources_update_path_and_body(self) -> None:
+        FakeClient.responses = [
+            {
+                "success": True,
+                "engine": "java",
+                "runtimeApiVersion": "foggy-runtime-api/v1",
+                "data": {"capabilities": {"datasources.update": "supported"}},
+            },
+            {"success": True, "engine": "java", "data": {"datasource": {"name": "sales sqlite"}}},
+        ]
+
+        code, _output, error = self.run_cli(
+            [
+                "datasources",
+                "update",
+                "sales sqlite",
+                "--jdbc-url",
+                "jdbc:sqlite:./sales-v2.db",
+                "--disabled",
+            ]
+        )
+
+        self.assertEqual(EXIT_OK, code)
+        self.assertEqual("", error)
+        self.assertEqual(
+            [
+                ("GET", "/api/v1/capabilities", None),
+                (
+                    "PUT",
+                    "/api/v1/datasources/sales%20sqlite",
+                    {
+                        "name": "sales sqlite",
+                        "type": "sqlite",
+                        "jdbcUrl": "jdbc:sqlite:./sales-v2.db",
+                        "replace": True,
+                        "enabled": False,
+                    },
+                ),
+            ],
+            FakeClient.calls,
+        )
+
+    def test_datasources_test_path(self) -> None:
+        FakeClient.responses = [
+            {
+                "success": True,
+                "engine": "java",
+                "runtimeApiVersion": "foggy-runtime-api/v1",
+                "data": {"capabilities": {"datasources.test": "supported"}},
+            },
+            {"success": True, "engine": "java", "data": {"connected": True}},
+        ]
+
+        code, _output, error = self.run_cli(["datasources", "test", "sales sqlite"])
+
+        self.assertEqual(EXIT_OK, code)
+        self.assertEqual("", error)
+        self.assertEqual(
+            [
+                ("GET", "/api/v1/capabilities", None),
+                ("POST", "/api/v1/datasources/sales%20sqlite/test", None),
+            ],
+            FakeClient.calls,
+        )
+
+    def test_datasources_bind_path_and_body(self) -> None:
+        FakeClient.responses = [
+            {
+                "success": True,
+                "engine": "java",
+                "runtimeApiVersion": "foggy-runtime-api/v1",
+                "data": {"capabilities": {"datasources.bind": "supported"}},
+            },
+            {"success": True, "engine": "java", "data": {"namespace": "dev"}},
+        ]
+
+        code, _output, error = self.run_cli(
+            ["datasources", "bind", "--namespace", "dev ns", "--data-source", "sales-sqlite"]
+        )
+
+        self.assertEqual(EXIT_OK, code)
+        self.assertEqual("", error)
+        self.assertEqual(
+            [
+                ("GET", "/api/v1/capabilities", None),
+                (
+                    "PUT",
+                    "/api/v1/namespaces/dev%20ns/datasource",
+                    {"namespace": "dev ns", "dataSource": "sales-sqlite"},
+                ),
+            ],
+            FakeClient.calls,
+        )
+
+    def test_datasources_command_unsupported_capability_stops_before_route(self) -> None:
+        FakeClient.responses = [
+            {
+                "success": True,
+                "engine": "java",
+                "runtimeApiVersion": "foggy-runtime-api/v1",
+                "data": {"capabilities": {"datasources.add": "unsupported"}},
+            }
+        ]
+
+        code, output, error = self.run_cli(
+            ["datasources", "add", "--name", "sales-sqlite", "--jdbc-url", "jdbc:sqlite:./sales.db"]
+        )
+
+        self.assertEqual(EXIT_UNSUPPORTED, code)
+        self.assertEqual("", error)
+        self.assertEqual([("GET", "/api/v1/capabilities", None)], FakeClient.calls)
+        self.assertIn('"code": "UNSUPPORTED_OPERATION"', output)
+        self.assertIn('"phase": "datasources.add"', output)
+
     def test_resources_pull_writes_files_and_checks_capability(self) -> None:
         FakeClient.responses = [
             {

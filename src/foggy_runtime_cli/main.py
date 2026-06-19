@@ -142,6 +142,70 @@ def build_parser() -> argparse.ArgumentParser:
         required_capabilities=["bundles.remove"],
     )
 
+    datasources = subparsers.add_parser("datasources")
+    datasource_commands = datasources.add_subparsers(dest="datasources_command", required=True)
+
+    datasource_list = datasource_commands.add_parser("list")
+    datasource_list.set_defaults(
+        method="GET",
+        path="/api/v1/datasources",
+        body_builder=no_body,
+        required_capabilities=["datasources.list"],
+    )
+
+    datasource_add = datasource_commands.add_parser("add")
+    datasource_add.add_argument("--name", required=True)
+    datasource_add.add_argument("--type", default="sqlite", choices=["sqlite"])
+    datasource_add.add_argument("--jdbc-url", required=True)
+    datasource_add.add_argument("--username")
+    datasource_add.add_argument("--password-ref")
+    datasource_add.add_argument("--replace", action="store_true")
+    datasource_add.add_argument("--disabled", dest="enabled", action="store_false", default=True)
+    datasource_add.set_defaults(
+        method="POST",
+        path="/api/v1/datasources",
+        body_builder=datasource_add_body,
+        required_capabilities=["datasources.add"],
+    )
+
+    datasource_update = datasource_commands.add_parser("update")
+    datasource_update.add_argument("datasource")
+    datasource_update.add_argument("--type", default="sqlite", choices=["sqlite"])
+    datasource_update.add_argument("--jdbc-url", required=True)
+    datasource_update.add_argument("--username")
+    datasource_update.add_argument("--password-ref")
+    datasource_update.add_argument("--disabled", dest="enabled", action="store_false", default=True)
+    datasource_update.set_defaults(
+        method="PUT",
+        body_builder=datasource_update_body,
+        required_capabilities=["datasources.update"],
+    )
+
+    datasource_remove = datasource_commands.add_parser("remove")
+    datasource_remove.add_argument("datasource")
+    datasource_remove.set_defaults(
+        method="DELETE",
+        body_builder=no_body,
+        required_capabilities=["datasources.remove"],
+    )
+
+    datasource_test = datasource_commands.add_parser("test")
+    datasource_test.add_argument("datasource")
+    datasource_test.set_defaults(
+        method="POST",
+        body_builder=no_body,
+        required_capabilities=["datasources.test"],
+    )
+
+    datasource_bind = datasource_commands.add_parser("bind")
+    datasource_bind.add_argument("--namespace", dest="bind_namespace", required=True)
+    datasource_bind.add_argument("--data-source", required=True)
+    datasource_bind.set_defaults(
+        method="PUT",
+        body_builder=datasource_bind_body,
+        required_capabilities=["datasources.bind"],
+    )
+
     resources = subparsers.add_parser("resources")
     resource_commands = resources.add_subparsers(dest="resources_command", required=True)
 
@@ -321,6 +385,12 @@ def build_body(args: argparse.Namespace, stdin: TextIO, stderr: TextIO) -> dict[
             args.path = f"/api/v1/models/{path_quote(args.model)}/describe"
     if getattr(args, "bundles_command", None) in {"update", "remove"}:
         args.path = f"/api/v1/bundles/{path_quote(args.bundle)}"
+    if getattr(args, "datasources_command", None) in {"update", "remove"}:
+        args.path = f"/api/v1/datasources/{path_quote(args.datasource)}"
+    if getattr(args, "datasources_command", None) == "test":
+        args.path = f"/api/v1/datasources/{path_quote(args.datasource)}/test"
+    if getattr(args, "datasources_command", None) == "bind":
+        args.path = f"/api/v1/namespaces/{path_quote(args.bind_namespace)}/datasource"
     try:
         return args.body_builder(args, stdin)
     except (OSError, ValueError) as exc:
@@ -369,6 +439,43 @@ def bundle_remove_body(args: argparse.Namespace, _stdin: TextIO) -> dict[str, An
     if args.namespace:
         body["namespace"] = args.namespace
     return body
+
+
+def datasource_add_body(args: argparse.Namespace, _stdin: TextIO) -> dict[str, Any]:
+    body: dict[str, Any] = {
+        "name": args.name,
+        "type": args.type,
+        "jdbcUrl": args.jdbc_url,
+        "replace": args.replace,
+        "enabled": args.enabled,
+    }
+    if args.username:
+        body["username"] = args.username
+    if args.password_ref:
+        body["passwordRef"] = args.password_ref
+    return body
+
+
+def datasource_update_body(args: argparse.Namespace, _stdin: TextIO) -> dict[str, Any]:
+    body: dict[str, Any] = {
+        "name": args.datasource,
+        "type": args.type,
+        "jdbcUrl": args.jdbc_url,
+        "replace": True,
+        "enabled": args.enabled,
+    }
+    if args.username:
+        body["username"] = args.username
+    if args.password_ref:
+        body["passwordRef"] = args.password_ref
+    return body
+
+
+def datasource_bind_body(args: argparse.Namespace, _stdin: TextIO) -> dict[str, Any]:
+    return {
+        "namespace": args.bind_namespace,
+        "dataSource": args.data_source,
+    }
 
 
 def resource_export_body(args: argparse.Namespace, _stdin: TextIO) -> dict[str, Any]:
