@@ -66,6 +66,14 @@ def main(
         print(f"transport error: {exc}", file=stderr)
         return EXIT_TRANSPORT_ERROR
 
+    response_handler = getattr(args, "response_handler", None)
+    if response_handler is not None and response.get("success") is True:
+        try:
+            response = response_handler(args, response)
+        except (OSError, ValueError) as exc:
+            print(f"input error: {exc}", file=stderr)
+            return EXIT_CLI_ERROR
+
     render_response(response, args.output, stdout)
     return exit_code_for_response(response)
 
@@ -132,6 +140,33 @@ def build_parser() -> argparse.ArgumentParser:
         method="DELETE",
         body_builder=bundle_remove_body,
         required_capabilities=["bundles.remove"],
+    )
+
+    resources = subparsers.add_parser("resources")
+    resource_commands = resources.add_subparsers(dest="resources_command", required=True)
+
+    resource_pull = resource_commands.add_parser("pull")
+    resource_pull.add_argument("--bundle", required=True)
+    resource_pull.add_argument("--out", required=True, help="Local directory to write exported resources into.")
+    resource_pull.add_argument("--path", action="append", dest="resource_paths", default=None)
+    resource_pull.set_defaults(
+        method="POST",
+        path="/api/v1/resources/export",
+        body_builder=resource_export_body,
+        response_handler=resource_pull_response,
+        required_capabilities=["resources.export"],
+    )
+
+    resource_save = resource_commands.add_parser("save")
+    resource_save.add_argument("--bundle", required=True)
+    resource_save.add_argument("--dir", dest="resource_dir", required=True)
+    resource_save.add_argument("--validate", action="store_true")
+    resource_save.add_argument("--refresh", action="store_true")
+    resource_save.set_defaults(
+        method="POST",
+        path="/api/v1/resources/save",
+        body_builder=resource_save_body,
+        required_capabilities=["resources.save"],
     )
 
     models = subparsers.add_parser("models")
@@ -336,6 +371,67 @@ def bundle_remove_body(args: argparse.Namespace, _stdin: TextIO) -> dict[str, An
     return body
 
 
+def resource_export_body(args: argparse.Namespace, _stdin: TextIO) -> dict[str, Any]:
+    body: dict[str, Any] = {
+        "bundle": args.bundle,
+        "includeContent": True,
+    }
+    if args.namespace:
+        body["namespace"] = args.namespace
+    if args.resource_paths:
+        body["paths"] = args.resource_paths
+    return body
+
+
+def resource_save_body(args: argparse.Namespace, _stdin: TextIO) -> dict[str, Any]:
+    root = Path(args.resource_dir).resolve()
+    if not root.is_dir():
+        raise ValueError(f"resource directory does not exist: {root}")
+    files: list[dict[str, str]] = []
+    for path in sorted(root.rglob("*")):
+        if not path.is_file():
+            continue
+        relative = path.relative_to(root).as_posix()
+        if not is_semantic_resource_path(relative):
+            continue
+        files.append({"path": relative, "content": path.read_text(encoding="utf-8")})
+    if not files:
+        raise ValueError(f"no semantic resources found under {root}")
+    body: dict[str, Any] = {
+        "bundle": args.bundle,
+        "files": files,
+        "validate": args.validate,
+        "refresh": args.refresh,
+    }
+    if args.namespace:
+        body["namespace"] = args.namespace
+    return body
+
+
+def resource_pull_response(args: argparse.Namespace, response: dict[str, Any]) -> dict[str, Any]:
+    out_dir = Path(args.out).resolve()
+    data = response.get("data")
+    resources = data.get("resources") if isinstance(data, dict) else None
+    if not isinstance(resources, list):
+        raise ValueError("resources export response is missing data.resources")
+    written_files: list[str] = []
+    for resource in resources:
+        if not isinstance(resource, dict):
+            continue
+        relative = str(resource.get("path") or "")
+        content = resource.get("content")
+        if not relative or content is None:
+            continue
+        target = safe_resource_output_path(out_dir, relative)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(str(content), encoding="utf-8")
+        written_files.append(str(target))
+    if isinstance(data, dict):
+        data["localOutputDir"] = str(out_dir)
+        data["writtenFiles"] = written_files
+    return response
+
+
 def describe_body(args: argparse.Namespace, _stdin: TextIO) -> dict[str, Any]:
     body: dict[str, Any] = {}
     if args.namespace:
@@ -438,6 +534,24 @@ def read_json_payload(payload_ref: str, stdin: TextIO) -> dict[str, Any]:
     if not isinstance(payload, dict):
         raise ValueError(f"{source} must contain a JSON object")
     return payload
+
+
+def is_semantic_resource_path(path: str) -> bool:
+    name = Path(path).name.lower()
+    if name.endswith(".tm") or name.endswith(".qm"):
+        return True
+    is_model_list = "model-list" in name or "modellist" in name
+    return is_model_list and name.endswith((".yml", ".yaml", ".json", ".txt"))
+
+
+def safe_resource_output_path(root: Path, relative: str) -> Path:
+    relative_path = Path(relative.replace("\\", "/"))
+    if relative_path.is_absolute() or any(part == ".." for part in relative_path.parts):
+        raise ValueError(f"resource path escapes output directory: {relative}")
+    target = (root / relative_path).resolve()
+    if not target.is_relative_to(root):
+        raise ValueError(f"resource path escapes output directory: {relative}")
+    return target
 
 
 def demo_sales_drop_plan(args: argparse.Namespace) -> dict[str, Any]:

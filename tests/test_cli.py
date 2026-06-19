@@ -421,6 +421,121 @@ class CliTest(unittest.TestCase):
         self.assertIn('"code": "UNSUPPORTED_OPERATION"', output)
         self.assertIn('"phase": "bundles.add"', output)
 
+    def test_resources_pull_writes_files_and_checks_capability(self) -> None:
+        FakeClient.responses = [
+            {
+                "success": True,
+                "engine": "java",
+                "runtimeApiVersion": "foggy-runtime-api/v1",
+                "data": {"capabilities": {"resources.export": "supported"}},
+            },
+            {
+                "success": True,
+                "engine": "java",
+                "data": {
+                    "bundle": "sales-drop-dev",
+                    "resources": [
+                        {"path": "model/Sales.tm", "content": "table_model Sales {}\n"},
+                        {"path": "query/SalesModel.qm", "content": "query_model SalesModel {}\n"},
+                    ],
+                },
+            },
+        ]
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            code, output, error = self.run_cli(
+                [
+                    "--namespace",
+                    "dev",
+                    "resources",
+                    "pull",
+                    "--bundle",
+                    "sales-drop-dev",
+                    "--out",
+                    temp_dir,
+                ]
+            )
+            out_dir = Path(temp_dir)
+            tm_text = (out_dir / "model" / "Sales.tm").read_text(encoding="utf-8")
+            qm_text = (out_dir / "query" / "SalesModel.qm").read_text(encoding="utf-8")
+
+        payload = json.loads(output)
+        self.assertEqual(EXIT_OK, code)
+        self.assertEqual("", error)
+        self.assertEqual("table_model Sales {}\n", tm_text)
+        self.assertEqual("query_model SalesModel {}\n", qm_text)
+        self.assertEqual(
+            [
+                ("GET", "/api/v1/capabilities", None),
+                (
+                    "POST",
+                    "/api/v1/resources/export",
+                    {"bundle": "sales-drop-dev", "includeContent": True, "namespace": "dev"},
+                ),
+            ],
+            FakeClient.calls,
+        )
+        self.assertEqual(2, len(payload["data"]["writtenFiles"]))
+
+    def test_resources_save_collects_semantic_files(self) -> None:
+        FakeClient.responses = [
+            {
+                "success": True,
+                "engine": "java",
+                "runtimeApiVersion": "foggy-runtime-api/v1",
+                "data": {"capabilities": {"resources.save": "supported"}},
+            },
+            {"success": True, "engine": "java", "data": {"savedCount": 3}},
+        ]
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            (root / "model").mkdir()
+            (root / "query").mkdir()
+            (root / "model" / "Sales.tm").write_text("table_model Sales {}\n", encoding="utf-8")
+            (root / "query" / "SalesModel.qm").write_text("query_model SalesModel {}\n", encoding="utf-8")
+            (root / "model-list.yml").write_text("models: []\n", encoding="utf-8")
+            (root / "README.md").write_text("ignored\n", encoding="utf-8")
+
+            code, _output, error = self.run_cli(
+                [
+                    "--namespace",
+                    "dev",
+                    "resources",
+                    "save",
+                    "--bundle",
+                    "sales-drop-dev",
+                    "--dir",
+                    temp_dir,
+                    "--validate",
+                    "--refresh",
+                ]
+            )
+
+        self.assertEqual(EXIT_OK, code)
+        self.assertEqual("", error)
+        self.assertEqual("POST", FakeClient.calls[1][0])
+        self.assertEqual("/api/v1/resources/save", FakeClient.calls[1][1])
+        body = FakeClient.calls[1][2]
+        self.assertEqual("sales-drop-dev", body["bundle"])
+        self.assertEqual("dev", body["namespace"])
+        self.assertTrue(body["validate"])
+        self.assertTrue(body["refresh"])
+        self.assertEqual(
+            ["model/Sales.tm", "model-list.yml", "query/SalesModel.qm"],
+            [item["path"] for item in body["files"]],
+        )
+
+    def test_resources_save_rejects_empty_dir_before_api_call(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            code, _output, error = self.run_cli(
+                ["resources", "save", "--bundle", "sales-drop-dev", "--dir", temp_dir]
+            )
+
+        self.assertEqual(1, code)
+        self.assertIn("no semantic resources found", error)
+        self.assertEqual([], FakeClient.calls)
+
     def test_demo_sales_drop_plan_is_local(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             repo_root = Path(temp_dir)

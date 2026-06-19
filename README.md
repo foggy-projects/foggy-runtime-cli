@@ -12,6 +12,8 @@ foggy-runtime bundles list
 foggy-runtime bundles add --name sales-drop-dev --path ./models --namespace default --watch --validate --refresh
 foggy-runtime bundles update sales-drop-dev --path ./models --watch
 foggy-runtime bundles remove sales-drop-dev
+foggy-runtime resources pull --bundle sales-drop-dev --out ./work-models
+foggy-runtime resources save --bundle sales-drop-dev --dir ./work-models --validate --refresh
 foggy-runtime models list
 foggy-runtime models describe FactSalesQueryModel
 foggy-runtime models refresh --model FactSalesQueryModel
@@ -51,6 +53,8 @@ Automation and Skills should keep using JSON output so they can validate the ful
 `models validate` sends `clearExisting=true` by default so repeated validation runs replace the temporary runtime validation bundle. Use `--no-clear-existing` only when debugging bundle watch behavior.
 
 `bundles list|add|update|remove` manages only Runtime API-owned bundles. Configured bundles may appear in `bundles list`, but the runtime rejects update/remove for bundles that came from yml, startup args, or other engine configuration.
+
+`resources pull|save` syncs `.tm`, `.qm`, and model-list files for a named filesystem bundle. Save is allowed only for Runtime API-owned bundles. The current Runtime API accepts `--validate` and `--refresh` on save but returns warnings; run `models validate` and `models refresh` explicitly when evidence is needed.
 
 `compose validate|preview|execute` and `fsscript run` read `--script <path>` or `--script -`; use `--script-text` only for short inline smoke checks. These commands preflight `capabilities` and stop with exit code `3` when the connected Runtime API does not support the required capability.
 
