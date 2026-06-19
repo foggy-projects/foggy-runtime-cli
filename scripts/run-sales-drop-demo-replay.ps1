@@ -209,6 +209,22 @@ function Test-CapabilitiesJson {
     return ""
 }
 
+function Test-WaitReadyJson {
+    param([string]$OutputPath)
+    $message = Test-CapabilitiesJson -OutputPath $OutputPath
+    if ($message) {
+        return $message
+    }
+    $body = Read-JsonFile -Path $OutputPath
+    if ($body.data.ready -ne $true) {
+        return "wait-ready data.ready is not true."
+    }
+    if ([int]$body.data.attemptCount -lt 1) {
+        return "wait-ready attemptCount is less than 1."
+    }
+    return ""
+}
+
 function Test-ModelsValidateJson {
     param([string]$OutputPath)
     $message = Test-JsonSuccess -OutputPath $OutputPath
@@ -262,33 +278,33 @@ function Invoke-Cli {
 }
 
 function Wait-RuntimeReady {
-    $deadline = (Get-Date).AddSeconds($ReadyTimeoutSeconds)
     $script:WaitReady.status = "waiting"
     $script:WaitReady.startedAt = (Get-Date).ToString("o")
-    while ((Get-Date) -lt $deadline) {
-        if ($script:StartedProcess -and $script:StartedProcess.HasExited) {
-            $script:WaitReady.status = "failed"
-            $script:WaitReady.finishedAt = (Get-Date).ToString("o")
-            throw "Java runtime exited before readiness. See $ServerOutPath and $ServerErrPath"
-        }
-        $probe = Invoke-Cli -Name "ready-capabilities" -CliArgs @("capabilities") -Validator ${function:Test-CapabilitiesJson} -IncludeInSummary $false
-        $script:WaitReady.attempts += [pscustomobject]@{
-            step = $probe.output -replace '^.*\\(\d+)-.*$', '$1'
-            result = $probe.result
-            exitCode = $probe.exitCode
-            output = $probe.output
-            error = $probe.error
-            validationMessage = $probe.validationMessage
-        }
-        if ($probe.result -eq "passed") {
-            $script:WaitReady.status = "passed"
-            $script:WaitReady.finishedAt = (Get-Date).ToString("o")
-            return
-        }
-        Start-Sleep -Seconds 2
+    if ($script:StartedProcess -and $script:StartedProcess.HasExited) {
+        $script:WaitReady.status = "failed"
+        $script:WaitReady.finishedAt = (Get-Date).ToString("o")
+        throw "Java runtime exited before readiness. See $ServerOutPath and $ServerErrPath"
     }
-    $script:WaitReady.status = "failed"
+
+    $probe = Invoke-Cli -Name "wait-ready" -CliArgs @("wait-ready", "--timeout-seconds", "$ReadyTimeoutSeconds", "--interval-seconds", "2") -Validator ${function:Test-WaitReadyJson}
+    $body = $null
+    try {
+        $body = Read-JsonFile -Path $probe.output
+    }
+    catch {
+        $body = $null
+    }
+
+    if ($body -and $body.data -and $body.data.PSObject.Properties["attempts"]) {
+        $script:WaitReady.attempts = @($body.data.attempts)
+    }
+    $script:WaitReady.command = $probe.output
+    $script:WaitReady.status = if ($probe.result -eq "passed") { "passed" } else { "failed" }
     $script:WaitReady.finishedAt = (Get-Date).ToString("o")
+
+    if ($probe.result -eq "passed") {
+        return
+    }
     throw "Runtime API did not become ready within $ReadyTimeoutSeconds seconds. See $ServerOutPath and $ServerErrPath"
 }
 
@@ -391,6 +407,8 @@ function Invoke-QuestionBankReplay {
             id = $caseId
             question = $case.question
             declaredStatus = $caseStatus
+            capabilitySet = $case.capabilitySet
+            decision = $case.decision
             expectedBehavior = $case.expectedBehavior
             requiredFields = $requiredFields
             missingFields = $missingFields
@@ -489,6 +507,99 @@ function Invoke-QuestionBankReplay {
     return $coveragePath
 }
 
+function Add-LogClassificationEntry {
+    param(
+        [hashtable]$Counts,
+        [object[]]$Samples,
+        [string]$Category,
+        [string]$File,
+        [int]$LineNumber,
+        [string]$Reason,
+        [string]$Text
+    )
+
+    $Counts[$Category] = [int]$Counts[$Category] + 1
+    if ($Samples.Count -lt 80) {
+        $Samples += [pscustomobject]@{
+            category = $Category
+            file = $File
+            line = $LineNumber
+            reason = $Reason
+            text = $Text
+        }
+    }
+    return $Samples
+}
+
+function Classify-RuntimeLogs {
+    $counts = @{
+        blocker = 0
+        warning = 0
+        noise = 0
+        unknown = 0
+    }
+    $samples = @()
+    $files = @($ServerOutPath, $ServerErrPath)
+
+    foreach ($file in $files) {
+        if (-not (Test-Path $file)) {
+            continue
+        }
+        $lineNumber = 0
+        foreach ($line in Get-Content -Path $file -Encoding utf8) {
+            $lineNumber += 1
+            if ($line -cmatch '^\d{4}-\d{2}-\d{2} .* INFO ') {
+                continue
+            }
+            if ($line -cnotmatch '(WARN|ERROR|Exception|APPLICATION FAILED TO START|Address already in use|BindException|\[SQLITE_ERROR\]|Failed to restore data source|Named data source)') {
+                continue
+            }
+
+            $category = "warning"
+            $reason = "runtime warning or error"
+            if ($line -cmatch '(APPLICATION FAILED TO START|Address already in use|BindException|Port .* already in use|OutOfMemoryError)') {
+                $category = "blocker"
+                $reason = "runtime startup blocker"
+            }
+            elseif ($line -cmatch '(BeanPostProcessorChecker|DbModelDictServiceImpl|\[SQLITE_ERROR\].*no such table|JdbcQueryModelBuilder - QM \[(Fact|Dim|Odoo|Account|Crm|Hr|Mrp|Product|Project|Purchase|Res)|QueryModelLoaderImpl.*(foggy-dataset-demo|odoo)|Table or view not found|metadata skipped because model is missing)') {
+                $category = "noise"
+                $reason = "known non-blocking lite/default-bundle startup noise"
+            }
+            elseif ($line -cmatch '(Failed to restore data source: odoo|PoolInitializationException|PSQLException|ConnectException|Connection refused|Named data source .odoo. not found|ClientAuthorizationException)') {
+                $category = "warning"
+                $reason = "known non-blocking external/default datasource warning"
+            }
+            elseif ($line -cmatch '(WARN|ERROR|Exception|\[SQLITE_ERROR\])') {
+                $category = "warning"
+                $reason = "unclassified runtime warning"
+            }
+            else {
+                $category = "unknown"
+                $reason = "matched scan pattern without severity"
+            }
+
+            $samples = Add-LogClassificationEntry -Counts $counts -Samples $samples -Category $category -File $file -LineNumber $lineNumber -Reason $reason -Text $line
+        }
+    }
+
+    $classification = [ordered]@{
+        schemaVersion = "foggy-demo-runtime-log-classification/v1"
+        generatedAt = (Get-Date).ToString("o")
+        files = $files
+        blockerCount = [int]$counts.blocker
+        warningCount = [int]$counts.warning
+        noiseCount = [int]$counts.noise
+        unknownCount = [int]$counts.unknown
+        samples = $samples
+        notes = @(
+            "Only blocker entries fail the replay.",
+            "Known lite/default-bundle startup noise is retained for operator visibility."
+        )
+    }
+    $classification | ConvertTo-Json -Depth 8 | Out-File -FilePath $RuntimeLogClassificationPath -Encoding utf8
+    return $classification
+}
+
 if (-not $EvidenceDir) {
     $stamp = Get-Date -Format "yyyyMMdd-HHmmss"
     $EvidenceDir = Resolve-DefaultPath -Base $RepoRoot -Relative ".codex-tmp\foggy-ai-analysis-demo\sales-drop-replay-$stamp"
@@ -514,6 +625,7 @@ $RunLogPath = Join-Path $EvidenceDir "run-log.md"
 $SummaryPath = Join-Path $EvidenceDir "summary.json"
 $MarkdownSummaryPath = Join-Path $EvidenceDir "evidence-summary.md"
 $CommandStatusPath = Join-Path $EvidenceDir "command-status.csv"
+$RuntimeLogClassificationPath = Join-Path $EvidenceDir "runtime-log-classification.json"
 $script:Step = 0
 $script:Results = @()
 $script:StartedProcess = $null
@@ -525,6 +637,7 @@ $script:WaitReady = [ordered]@{
     finishedAt = $null
     attempts = @()
 }
+$script:RuntimeLogClassification = $null
 $oldPythonPath = $env:PYTHONPATH
 
 New-Item -ItemType Directory -Force -Path $EvidenceDir | Out-Null
@@ -631,8 +744,10 @@ print(db)
 
     $questionBankEvidence = Invoke-QuestionBankReplay
 
+    $script:RuntimeLogClassification = Classify-RuntimeLogs
     $failed = @($script:Results | Where-Object { $_.includeInSummary -and $_.result -ne "passed" })
-    $status = if ($failed.Count -eq 0) { "passed" } else { "failed" }
+    $runtimeBlockers = [int]$script:RuntimeLogClassification.blockerCount
+    $status = if ($failed.Count -eq 0 -and $runtimeBlockers -eq 0) { "passed" } else { "failed" }
     $summary = [ordered]@{
         schemaVersion = "foggy-demo-evidence/v1"
         generatedAt = (Get-Date).ToString("o")
@@ -651,6 +766,8 @@ print(db)
         questionBankEvidence = $questionBankEvidence
         commandStatus = $CommandStatusPath
         waitReady = $script:WaitReady
+        runtimeLogClassification = $RuntimeLogClassificationPath
+        runtimeLogClassificationSummary = $script:RuntimeLogClassification
         results = $script:Results
         notes = @(
             "This script is for trusted local technical/developer use with full runtime privileges.",
@@ -671,6 +788,8 @@ print(db)
         "- Command log: $RunLogPath",
         "- Command status: $CommandStatusPath",
         "- Question bank evidence: $questionBankEvidence",
+        "- Runtime log classification: $RuntimeLogClassificationPath",
+        "- Runtime log blockers: $($script:RuntimeLogClassification.blockerCount), warnings: $($script:RuntimeLogClassification.warningCount), noise: $($script:RuntimeLogClassification.noiseCount), unknown: $($script:RuntimeLogClassification.unknownCount)",
         "- Runtime stopped by script: $([bool]($script:StartedProcess -and -not $NoStop))",
         "",
         "## Scope",
@@ -692,7 +811,7 @@ print(db)
     }
     $summaryMarkdown | Out-File -FilePath $MarkdownSummaryPath -Encoding utf8
 
-    if ($failed.Count -gt 0) {
+    if ($failed.Count -gt 0 -or $runtimeBlockers -gt 0) {
         Write-Error "Sales-drop replay failed. See $SummaryPath"
         exit 1
     }
@@ -704,6 +823,12 @@ print(db)
 }
 catch {
     $failureMessage = $_.Exception.Message
+    try {
+        $script:RuntimeLogClassification = Classify-RuntimeLogs
+    }
+    catch {
+        $script:RuntimeLogClassification = $null
+    }
     $script:Results | Export-Csv -Path $CommandStatusPath -NoTypeInformation -Encoding utf8
     $summary = [ordered]@{
         schemaVersion = "foggy-demo-evidence/v1"
@@ -724,6 +849,8 @@ catch {
         questionBankEvidence = $null
         commandStatus = $CommandStatusPath
         waitReady = $script:WaitReady
+        runtimeLogClassification = $RuntimeLogClassificationPath
+        runtimeLogClassificationSummary = $script:RuntimeLogClassification
         runtimeStdout = $ServerOutPath
         runtimeStderr = $ServerErrPath
         results = $script:Results
@@ -746,6 +873,8 @@ catch {
         "- Command status: $CommandStatusPath",
         "- Runtime stdout: $ServerOutPath",
         "- Runtime stderr: $ServerErrPath",
+        "- Runtime log classification: $RuntimeLogClassificationPath",
+        $(if ($script:RuntimeLogClassification) { "- Runtime log blockers: $($script:RuntimeLogClassification.blockerCount), warnings: $($script:RuntimeLogClassification.warningCount), noise: $($script:RuntimeLogClassification.noiseCount), unknown: $($script:RuntimeLogClassification.unknownCount)" } else { "- Runtime log blockers: unavailable" }),
         "",
         "## Scope",
         "",

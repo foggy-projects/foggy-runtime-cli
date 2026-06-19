@@ -22,7 +22,7 @@ from foggy_runtime_cli.main import (
 class FakeClient:
     calls: list[tuple[str, str, dict[str, Any] | None]]
     response: dict[str, Any] = {"success": True, "engine": "java", "data": {}}
-    responses: list[dict[str, Any]] | None = None
+    responses: list[dict[str, Any] | Exception] | None = None
     raise_error: Exception | None = None
     init_args: tuple[str, str | None, float] | None = None
 
@@ -34,7 +34,10 @@ class FakeClient:
             raise type(self).raise_error
         type(self).calls.append((method, path, body))
         if type(self).responses is not None:
-            return type(self).responses.pop(0)
+            response = type(self).responses.pop(0)
+            if isinstance(response, Exception):
+                raise response
+            return response
         return type(self).response
 
 
@@ -66,6 +69,56 @@ class CliTest(unittest.TestCase):
         self.assertEqual(("http://runtime", None, 30.0), FakeClient.init_args)
         self.assertIn('"success": true', output)
         self.assertEqual("", error)
+
+    def test_wait_ready_succeeds_after_transport_error(self) -> None:
+        from foggy_runtime_cli.client import RuntimeTransportError
+
+        FakeClient.responses = [
+            RuntimeTransportError("connection refused"),
+            {
+                "success": True,
+                "engine": "java",
+                "runtimeApiVersion": "foggy-runtime-api/v1",
+                "data": {
+                    "schemaVersion": "2026-06-06",
+                    "securityMode": "none-dev-test-only",
+                    "capabilities": {"query.execute": "supported"},
+                },
+            },
+        ]
+
+        code, output, error = self.run_cli(
+            ["--base-url", "http://runtime", "wait-ready", "--timeout-seconds", "1", "--interval-seconds", "0"]
+        )
+
+        body = json.loads(output)
+        self.assertEqual(EXIT_OK, code)
+        self.assertEqual("", error)
+        self.assertEqual(
+            [("GET", "/api/v1/capabilities", None), ("GET", "/api/v1/capabilities", None)],
+            FakeClient.calls,
+        )
+        self.assertTrue(body["data"]["ready"])
+        self.assertEqual(2, body["data"]["attemptCount"])
+        self.assertEqual("transport-error", body["data"]["attempts"][0]["result"])
+        self.assertEqual("passed", body["data"]["attempts"][1]["result"])
+
+    def test_wait_ready_timeout_returns_transport_exit(self) -> None:
+        from foggy_runtime_cli.client import RuntimeTransportError
+
+        FakeClient.responses = [RuntimeTransportError("connection refused")]
+
+        code, output, error = self.run_cli(
+            ["--base-url", "http://runtime", "wait-ready", "--timeout-seconds", "0", "--interval-seconds", "0"]
+        )
+
+        body = json.loads(output)
+        self.assertEqual(EXIT_TRANSPORT_ERROR, code)
+        self.assertEqual("", error)
+        self.assertEqual("RUNTIME_NOT_READY", body["error"]["code"])
+        self.assertFalse(body["data"]["ready"])
+        self.assertEqual(1, body["data"]["attemptCount"])
+        self.assertEqual("transport-error", body["data"]["attempts"][0]["result"])
 
     def test_default_base_url_is_generic_local_runtime(self) -> None:
         with patch.dict(os.environ, {}, clear=True):

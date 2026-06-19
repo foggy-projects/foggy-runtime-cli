@@ -8,6 +8,7 @@ The CLI talks only to `/api/v1/*` runtime endpoints. It does not call Java or Py
 
 ```powershell
 foggy-runtime --base-url http://127.0.0.1:8080 capabilities
+foggy-runtime --base-url http://127.0.0.1:8080 wait-ready --timeout-seconds 90 --interval-seconds 2
 foggy-runtime bundles list
 foggy-runtime bundles add --name sales-drop-dev --path ./models --namespace default --watch --validate --refresh
 foggy-runtime bundles update sales-drop-dev --path ./models --watch
@@ -32,6 +33,8 @@ foggy-runtime demo sales-drop plan --repo-root D:\foggy-projects\foggy-data-mcp 
 JSON output is the default and preserves the Runtime API envelope for Skill consumption.
 
 The CLI is backend-neutral and does not select Java or Python. `--base-url` always wins, followed by `FOGGY_RUNTIME_API_URL`, then the local development default `http://127.0.0.1:8080`.
+
+Use `wait-ready` after starting a local dev/test runtime. It polls `GET /api/v1/capabilities` until the Runtime API is reachable and returns success; transient transport failures are retained in JSON `data.attempts`.
 
 Use `capabilities` to inspect the connected runtime's engine, Runtime API version, schema version, security mode, and supported capability map.
 
@@ -68,6 +71,7 @@ When validating copied fixtures, confirm the runtime datasource first. For the J
 
 - SQLite schema/data seeding.
 - Java lite runtime startup.
+- `wait-ready`.
 - `capabilities`.
 - `tables inspect`.
 - `models validate`.

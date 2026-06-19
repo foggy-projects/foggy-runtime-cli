@@ -4,6 +4,7 @@ import argparse
 import json
 import os
 import sys
+import time
 from pathlib import Path
 from typing import Any, Callable, TextIO
 
@@ -41,6 +42,14 @@ def main(
         response = local_handler(args)
         render_response(response, args.output, stdout)
         return exit_code_for_response(response)
+
+    runtime_handler = getattr(args, "runtime_handler", None)
+    if runtime_handler is not None:
+        base_url = resolve_base_url(args)
+        client = client_factory(base_url, args.namespace, args.timeout)
+        response, exit_code = runtime_handler(args, client, base_url)
+        render_response(response, args.output, stdout)
+        return exit_code
 
     body = build_body(args, stdin, stderr)
     if body is _BODY_ERROR:
@@ -93,6 +102,11 @@ def build_parser() -> argparse.ArgumentParser:
 
     capabilities = subparsers.add_parser("capabilities")
     capabilities.set_defaults(method="GET", path="/api/v1/capabilities", body_builder=no_body)
+
+    wait_ready = subparsers.add_parser("wait-ready")
+    wait_ready.add_argument("--timeout-seconds", type=float, default=90.0)
+    wait_ready.add_argument("--interval-seconds", type=float, default=2.0)
+    wait_ready.set_defaults(runtime_handler=wait_ready_handler)
 
     bundles = subparsers.add_parser("bundles")
     bundle_commands = bundles.add_subparsers(dest="bundles_command", required=True)
@@ -404,6 +418,116 @@ def resolve_base_url(args: argparse.Namespace) -> str:
     if generic:
         return generic
     return DEFAULT_BASE_URL
+
+
+def wait_ready_handler(
+    args: argparse.Namespace,
+    client: Any,
+    base_url: str,
+) -> tuple[dict[str, Any], int]:
+    timeout_seconds = max(float(args.timeout_seconds), 0.0)
+    interval_seconds = max(float(args.interval_seconds), 0.0)
+    started_at = time.monotonic()
+    deadline = started_at + timeout_seconds
+    attempts: list[dict[str, Any]] = []
+    last_error: dict[str, Any] | None = None
+    attempt_number = 0
+
+    while True:
+        attempt_number += 1
+        try:
+            response = client.request("GET", "/api/v1/capabilities", None)
+        except RuntimeTransportError as exc:
+            elapsed_ms = int((time.monotonic() - started_at) * 1000)
+            last_error = {"code": "TRANSPORT_ERROR", "message": str(exc)}
+            attempts.append(
+                {
+                    "attempt": attempt_number,
+                    "elapsedMs": elapsed_ms,
+                    "result": "transport-error",
+                    "message": str(exc),
+                }
+            )
+        else:
+            elapsed_ms = int((time.monotonic() - started_at) * 1000)
+            if response.get("success") is True:
+                data = response.get("data") if isinstance(response.get("data"), dict) else {}
+                attempts.append(
+                    {
+                        "attempt": attempt_number,
+                        "elapsedMs": elapsed_ms,
+                        "result": "passed",
+                        "engine": response.get("engine", "unknown"),
+                    }
+                )
+                return (
+                    {
+                        "success": True,
+                        "engine": response.get("engine", "unknown"),
+                        "runtimeApiVersion": response.get("runtimeApiVersion"),
+                        "data": {
+                            "ready": True,
+                            "baseUrl": base_url,
+                            "namespace": args.namespace,
+                            "attemptCount": attempt_number,
+                            "elapsedMs": elapsed_ms,
+                            "attempts": attempts,
+                            "schemaVersion": data.get("schemaVersion"),
+                            "securityMode": data.get("securityMode"),
+                            "capabilities": data.get("capabilities", {}),
+                        },
+                        "diagnostics": response.get("diagnostics", {"attributes": {}}),
+                    },
+                    EXIT_OK,
+                )
+
+            error = response.get("error") if isinstance(response.get("error"), dict) else {}
+            last_error = {
+                "code": error.get("code", "API_ERROR"),
+                "message": error.get("message", "Runtime API readiness check failed."),
+            }
+            attempts.append(
+                {
+                    "attempt": attempt_number,
+                    "elapsedMs": elapsed_ms,
+                    "result": "api-error",
+                    "code": last_error["code"],
+                    "message": last_error["message"],
+                }
+            )
+
+        if time.monotonic() >= deadline:
+            break
+
+        sleep_seconds = min(interval_seconds, max(deadline - time.monotonic(), 0.0))
+        if sleep_seconds > 0:
+            time.sleep(sleep_seconds)
+
+    elapsed_ms = int((time.monotonic() - started_at) * 1000)
+    return (
+        {
+            "success": False,
+            "engine": "unknown",
+            "runtimeApiVersion": None,
+            "data": {
+                "ready": False,
+                "baseUrl": base_url,
+                "namespace": args.namespace,
+                "attemptCount": attempt_number,
+                "elapsedMs": elapsed_ms,
+                "attempts": attempts,
+                "lastError": last_error,
+            },
+            "error": {
+                "code": "RUNTIME_NOT_READY",
+                "phase": "wait-ready",
+                "message": f"Runtime did not become ready within {timeout_seconds:g} seconds.",
+                "safeToAutoRepair": False,
+            },
+            "diagnostics": {"attributes": {"attempts": attempts}},
+        },
+        EXIT_TRANSPORT_ERROR,
+    )
 
 
 def build_body(args: argparse.Namespace, stdin: TextIO, stderr: TextIO) -> dict[str, Any] | None | object:
@@ -816,6 +940,10 @@ def demo_sales_drop_plan(args: argparse.Namespace) -> dict[str, Any]:
         {"name": "seed-schema", "argv": ["sqlite3", str(sqlite_path), f".read {schema}"]},
         {"name": "seed-data", "argv": ["sqlite3", str(sqlite_path), f".read {data}"]},
         {"name": "start-runtime", "argv": start_command},
+        {
+            "name": "wait-ready",
+            "argv": [*cli_base, "wait-ready", "--timeout-seconds", "90", "--interval-seconds", "2"],
+        },
         {"name": "capabilities", "argv": [*cli_base, "capabilities"]},
         {
             "name": "table-inspect",
