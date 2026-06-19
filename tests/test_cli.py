@@ -257,6 +257,136 @@ class CliTest(unittest.TestCase):
             FakeClient.calls,
         )
 
+    def test_tables_list_checks_capability_and_body(self) -> None:
+        FakeClient.responses = [
+            {
+                "success": True,
+                "engine": "java",
+                "runtimeApiVersion": "foggy-runtime-api/v1",
+                "data": {"capabilities": {"tables.list": "supported"}},
+            },
+            {"success": True, "engine": "java", "data": {"tables": []}},
+        ]
+
+        code, _output, error = self.run_cli(
+            [
+                "tables",
+                "list",
+                "--data-source",
+                "sales sqlite",
+                "--schema",
+                "public",
+                "--pattern",
+                "sales_%",
+                "--no-views",
+            ]
+        )
+
+        self.assertEqual(EXIT_OK, code)
+        self.assertEqual("", error)
+        self.assertEqual(
+            [
+                ("GET", "/api/v1/capabilities", None),
+                (
+                    "POST",
+                    "/api/v1/tables/list",
+                    {
+                        "dataSource": "sales sqlite",
+                        "schema": "public",
+                        "pattern": "sales_%",
+                        "includeViews": False,
+                    },
+                ),
+            ],
+            FakeClient.calls,
+        )
+
+    def test_sql_query_checks_capability_and_body(self) -> None:
+        FakeClient.responses = [
+            {
+                "success": True,
+                "engine": "java",
+                "runtimeApiVersion": "foggy-runtime-api/v1",
+                "data": {"capabilities": {"sql.query": "supported"}},
+            },
+            {"success": True, "engine": "java", "data": {"rows": []}},
+        ]
+
+        code, _output, error = self.run_cli(
+            [
+                "sql",
+                "query",
+                "--data-source",
+                "sales-sqlite",
+                "--sql",
+                "select * from sales_drop_daily",
+                "--max-rows",
+                "20",
+                "--timeout-seconds",
+                "5",
+            ]
+        )
+
+        self.assertEqual(EXIT_OK, code)
+        self.assertEqual("", error)
+        self.assertEqual(
+            [
+                ("GET", "/api/v1/capabilities", None),
+                (
+                    "POST",
+                    "/api/v1/sql/query",
+                    {
+                        "dataSource": "sales-sqlite",
+                        "sql": "select * from sales_drop_daily",
+                        "maxRows": 20,
+                        "timeoutSeconds": 5,
+                    },
+                ),
+            ],
+            FakeClient.calls,
+        )
+
+    def test_sql_query_reads_stdin_file(self) -> None:
+        FakeClient.responses = [
+            {
+                "success": True,
+                "engine": "java",
+                "runtimeApiVersion": "foggy-runtime-api/v1",
+                "data": {"capabilities": {"sql.query": "supported"}},
+            },
+            {"success": True, "engine": "java", "data": {"rows": []}},
+        ]
+
+        code, _output, error = self.run_cli(["sql", "query", "--file", "-"], stdin="select 1")
+
+        self.assertEqual(EXIT_OK, code)
+        self.assertEqual("", error)
+        self.assertEqual(
+            [
+                ("GET", "/api/v1/capabilities", None),
+                ("POST", "/api/v1/sql/query", {"sql": "select 1"}),
+            ],
+            FakeClient.calls,
+        )
+
+    def test_sql_query_unsupported_capability_stops_before_route(self) -> None:
+        FakeClient.responses = [
+            {
+                "success": True,
+                "engine": "java",
+                "runtimeApiVersion": "foggy-runtime-api/v1",
+                "data": {"capabilities": {"sql.query": "unsupported"}},
+            }
+        ]
+
+        code, output, error = self.run_cli(["sql", "query", "--sql", "select 1"])
+
+        self.assertEqual(EXIT_UNSUPPORTED, code)
+        self.assertEqual("", error)
+        self.assertEqual([("GET", "/api/v1/capabilities", None)], FakeClient.calls)
+        self.assertIn('"code": "UNSUPPORTED_OPERATION"', output)
+        self.assertIn('"phase": "sql.query"', output)
+
     def test_bundles_list_checks_capability(self) -> None:
         FakeClient.responses = [
             {

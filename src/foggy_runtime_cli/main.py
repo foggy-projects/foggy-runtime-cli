@@ -322,6 +322,18 @@ def build_parser() -> argparse.ArgumentParser:
     tables = subparsers.add_parser("tables")
     table_commands = tables.add_subparsers(dest="tables_command", required=True)
 
+    table_list = table_commands.add_parser("list")
+    table_list.add_argument("--schema")
+    table_list.add_argument("--data-source")
+    table_list.add_argument("--pattern")
+    table_list.add_argument("--no-views", dest="include_views", action="store_false", default=True)
+    table_list.set_defaults(
+        method="POST",
+        path="/api/v1/tables/list",
+        body_builder=table_list_body,
+        required_capabilities=["tables.list"],
+    )
+
     inspect = table_commands.add_parser("inspect")
     inspect.add_argument("--table", required=True)
     inspect.add_argument("--schema")
@@ -329,6 +341,23 @@ def build_parser() -> argparse.ArgumentParser:
     inspect.add_argument("--include-indexes", action="store_true")
     inspect.add_argument("--include-foreign-keys", action="store_true")
     inspect.set_defaults(method="POST", path="/api/v1/tables/inspect", body_builder=table_inspect_body)
+
+    sql = subparsers.add_parser("sql")
+    sql_commands = sql.add_subparsers(dest="sql_command", required=True)
+
+    sql_query = sql_commands.add_parser("query")
+    sql_source = sql_query.add_mutually_exclusive_group(required=True)
+    sql_source.add_argument("--sql")
+    sql_source.add_argument("--file", dest="sql_file", help="Path to a SQL file, or '-' for stdin.")
+    sql_query.add_argument("--data-source")
+    sql_query.add_argument("--max-rows", type=int)
+    sql_query.add_argument("--timeout-seconds", type=int)
+    sql_query.set_defaults(
+        method="POST",
+        path="/api/v1/sql/query",
+        body_builder=sql_query_body,
+        required_capabilities=["sql.query"],
+    )
 
     demo = subparsers.add_parser("demo")
     demo_commands = demo.add_subparsers(dest="demo_command", required=True)
@@ -589,6 +618,37 @@ def table_inspect_body(args: argparse.Namespace, _stdin: TextIO) -> dict[str, An
         body["schema"] = args.schema
     if args.data_source:
         body["dataSource"] = args.data_source
+    return body
+
+
+def table_list_body(args: argparse.Namespace, _stdin: TextIO) -> dict[str, Any]:
+    body: dict[str, Any] = {
+        "includeViews": args.include_views,
+    }
+    if args.schema:
+        body["schema"] = args.schema
+    if args.data_source:
+        body["dataSource"] = args.data_source
+    if args.pattern:
+        body["pattern"] = args.pattern
+    return body
+
+
+def sql_query_body(args: argparse.Namespace, stdin: TextIO) -> dict[str, Any]:
+    if args.sql is not None:
+        sql = args.sql
+    elif args.sql_file == "-":
+        sql = stdin.read()
+    else:
+        with open(args.sql_file, "r", encoding="utf-8") as handle:
+            sql = handle.read()
+    body: dict[str, Any] = {"sql": sql}
+    if args.data_source:
+        body["dataSource"] = args.data_source
+    if args.max_rows is not None:
+        body["maxRows"] = args.max_rows
+    if args.timeout_seconds is not None:
+        body["timeoutSeconds"] = args.timeout_seconds
     return body
 
 
