@@ -257,6 +257,43 @@ class CliTest(unittest.TestCase):
             FakeClient.calls,
         )
 
+    def test_query_execute_payload_file_accepts_utf8_bom(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            payload_path = Path(temp_dir) / "payload.json"
+            payload_path.write_text(json.dumps({"columns": ["amount"], "limit": 10}), encoding="utf-8-sig")
+
+            code, _output, _error = self.run_cli(["query", "execute", "Fact Sales", "--payload", str(payload_path)])
+
+        self.assertEqual(EXIT_OK, code)
+        self.assertEqual(
+            [
+                (
+                    "POST",
+                    "/api/v1/query/Fact%20Sales/execute",
+                    {"columns": ["amount"], "limit": 10},
+                )
+            ],
+            FakeClient.calls,
+        )
+
+    def test_query_payload_from_stdin_accepts_utf8_bom(self) -> None:
+        code, _output, _error = self.run_cli(
+            ["query", "validate", "FactSales", "--payload", "-"],
+            stdin="\ufeff" + json.dumps({"columns": ["amount"], "limit": 1}),
+        )
+
+        self.assertEqual(EXIT_OK, code)
+        self.assertEqual(
+            [
+                (
+                    "POST",
+                    "/api/v1/query/FactSales/validate",
+                    {"columns": ["amount"], "limit": 1},
+                )
+            ],
+            FakeClient.calls,
+        )
+
     def test_tables_list_checks_capability_and_body(self) -> None:
         FakeClient.responses = [
             {

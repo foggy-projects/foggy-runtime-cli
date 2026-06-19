@@ -692,8 +692,9 @@ def read_json_payload(payload_ref: str, stdin: TextIO) -> dict[str, Any]:
         source = "stdin"
     else:
         source = payload_ref
-        with open(payload_ref, "r", encoding="utf-8") as handle:
+        with open(payload_ref, "r", encoding="utf-8-sig") as handle:
             raw = handle.read()
+    raw = raw.lstrip("\ufeff")
     try:
         payload = json.loads(raw)
     except json.JSONDecodeError as exc:
