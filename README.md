@@ -8,6 +8,10 @@ The CLI talks only to `/api/v1/*` runtime endpoints. It does not call Java or Py
 
 ```powershell
 foggy-runtime --base-url http://127.0.0.1:8080 capabilities
+foggy-runtime bundles list
+foggy-runtime bundles add --name sales-drop-dev --path ./models --namespace default --watch --validate --refresh
+foggy-runtime bundles update sales-drop-dev --path ./models --watch
+foggy-runtime bundles remove sales-drop-dev
 foggy-runtime models list
 foggy-runtime models describe FactSalesQueryModel
 foggy-runtime models refresh --model FactSalesQueryModel
@@ -45,6 +49,8 @@ capabilities:
 Automation and Skills should keep using JSON output so they can validate the full envelope and diagnostics.
 
 `models validate` sends `clearExisting=true` by default so repeated validation runs replace the temporary runtime validation bundle. Use `--no-clear-existing` only when debugging bundle watch behavior.
+
+`bundles list|add|update|remove` manages only Runtime API-owned bundles. Configured bundles may appear in `bundles list`, but the runtime rejects update/remove for bundles that came from yml, startup args, or other engine configuration.
 
 `compose validate|preview|execute` and `fsscript run` read `--script <path>` or `--script -`; use `--script-text` only for short inline smoke checks. These commands preflight `capabilities` and stop with exit code `3` when the connected Runtime API does not support the required capability.
 

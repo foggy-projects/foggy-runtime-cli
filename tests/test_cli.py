@@ -257,6 +257,170 @@ class CliTest(unittest.TestCase):
             FakeClient.calls,
         )
 
+    def test_bundles_list_checks_capability(self) -> None:
+        FakeClient.responses = [
+            {
+                "success": True,
+                "engine": "java",
+                "runtimeApiVersion": "foggy-runtime-api/v1",
+                "data": {"capabilities": {"bundles.list": "supported"}},
+            },
+            {"success": True, "engine": "java", "data": {"bundles": []}},
+        ]
+
+        code, _output, error = self.run_cli(["bundles", "list"])
+
+        self.assertEqual(EXIT_OK, code)
+        self.assertEqual("", error)
+        self.assertEqual(
+            [
+                ("GET", "/api/v1/capabilities", None),
+                ("GET", "/api/v1/bundles", None),
+            ],
+            FakeClient.calls,
+        )
+
+    def test_bundles_add_body(self) -> None:
+        FakeClient.responses = [
+            {
+                "success": True,
+                "engine": "java",
+                "runtimeApiVersion": "foggy-runtime-api/v1",
+                "data": {"capabilities": {"bundles.add": "supported"}},
+            },
+            {"success": True, "engine": "java", "data": {"bundle": {"name": "sales-drop-dev"}}},
+        ]
+
+        code, _output, error = self.run_cli(
+            [
+                "--namespace",
+                "dev",
+                "bundles",
+                "add",
+                "--name",
+                "sales-drop-dev",
+                "--path",
+                "./models",
+                "--watch",
+                "--replace",
+                "--validate",
+                "--refresh",
+            ]
+        )
+
+        self.assertEqual(EXIT_OK, code)
+        self.assertEqual("", error)
+        self.assertEqual(
+            [
+                ("GET", "/api/v1/capabilities", None),
+                (
+                    "POST",
+                    "/api/v1/bundles",
+                    {
+                        "name": "sales-drop-dev",
+                        "path": "./models",
+                        "watch": True,
+                        "replace": True,
+                        "validate": True,
+                        "refresh": True,
+                        "enabled": True,
+                        "namespace": "dev",
+                    },
+                ),
+            ],
+            FakeClient.calls,
+        )
+
+    def test_bundles_update_path_and_body(self) -> None:
+        FakeClient.responses = [
+            {
+                "success": True,
+                "engine": "java",
+                "runtimeApiVersion": "foggy-runtime-api/v1",
+                "data": {"capabilities": {"bundles.update": "supported"}},
+            },
+            {"success": True, "engine": "java", "data": {"bundle": {"name": "sales drop"}}},
+        ]
+
+        code, _output, error = self.run_cli(
+            [
+                "--namespace",
+                "dev",
+                "bundles",
+                "update",
+                "sales drop",
+                "--path",
+                "./models-v2",
+                "--watch",
+            ]
+        )
+
+        self.assertEqual(EXIT_OK, code)
+        self.assertEqual("", error)
+        self.assertEqual(
+            [
+                ("GET", "/api/v1/capabilities", None),
+                (
+                    "PUT",
+                    "/api/v1/bundles/sales%20drop",
+                    {
+                        "name": "sales drop",
+                        "path": "./models-v2",
+                        "watch": True,
+                        "replace": True,
+                        "validate": False,
+                        "refresh": False,
+                        "enabled": True,
+                        "namespace": "dev",
+                    },
+                ),
+            ],
+            FakeClient.calls,
+        )
+
+    def test_bundles_remove_path_and_capability(self) -> None:
+        FakeClient.responses = [
+            {
+                "success": True,
+                "engine": "java",
+                "runtimeApiVersion": "foggy-runtime-api/v1",
+                "data": {"capabilities": {"bundles.remove": "supported"}},
+            },
+            {"success": True, "engine": "java", "data": {"removed": True}},
+        ]
+
+        code, _output, error = self.run_cli(["bundles", "remove", "sales-drop-dev"])
+
+        self.assertEqual(EXIT_OK, code)
+        self.assertEqual("", error)
+        self.assertEqual(
+            [
+                ("GET", "/api/v1/capabilities", None),
+                ("DELETE", "/api/v1/bundles/sales-drop-dev", None),
+            ],
+            FakeClient.calls,
+        )
+
+    def test_bundles_command_unsupported_capability_stops_before_route(self) -> None:
+        FakeClient.responses = [
+            {
+                "success": True,
+                "engine": "python",
+                "runtimeApiVersion": "foggy-runtime-api/v1",
+                "data": {"capabilities": {"bundles.add": "unsupported"}},
+            }
+        ]
+
+        code, output, error = self.run_cli(
+            ["bundles", "add", "--name", "dev-bundle", "--path", "./models"]
+        )
+
+        self.assertEqual(EXIT_UNSUPPORTED, code)
+        self.assertEqual("", error)
+        self.assertEqual([("GET", "/api/v1/capabilities", None)], FakeClient.calls)
+        self.assertIn('"code": "UNSUPPORTED_OPERATION"', output)
+        self.assertIn('"phase": "bundles.add"', output)
+
     def test_demo_sales_drop_plan_is_local(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             repo_root = Path(temp_dir)

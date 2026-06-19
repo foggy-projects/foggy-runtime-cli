@@ -86,6 +86,54 @@ def build_parser() -> argparse.ArgumentParser:
     capabilities = subparsers.add_parser("capabilities")
     capabilities.set_defaults(method="GET", path="/api/v1/capabilities", body_builder=no_body)
 
+    bundles = subparsers.add_parser("bundles")
+    bundle_commands = bundles.add_subparsers(dest="bundles_command", required=True)
+
+    bundle_list = bundle_commands.add_parser("list")
+    bundle_list.set_defaults(
+        method="GET",
+        path="/api/v1/bundles",
+        body_builder=no_body,
+        required_capabilities=["bundles.list"],
+    )
+
+    bundle_add = bundle_commands.add_parser("add")
+    bundle_add.add_argument("--name", required=True)
+    bundle_add.add_argument("--path", dest="bundle_path", required=True)
+    bundle_add.add_argument("--watch", action="store_true")
+    bundle_add.add_argument("--replace", action="store_true")
+    bundle_add.add_argument("--validate", action="store_true")
+    bundle_add.add_argument("--refresh", action="store_true")
+    bundle_add.add_argument("--disabled", dest="enabled", action="store_false", default=True)
+    bundle_add.set_defaults(
+        method="POST",
+        path="/api/v1/bundles",
+        body_builder=bundle_add_body,
+        required_capabilities=["bundles.add"],
+    )
+
+    bundle_update = bundle_commands.add_parser("update")
+    bundle_update.add_argument("bundle")
+    bundle_update.add_argument("--path", dest="bundle_path", required=True)
+    bundle_update.add_argument("--watch", action="store_true")
+    bundle_update.add_argument("--validate", action="store_true")
+    bundle_update.add_argument("--refresh", action="store_true")
+    bundle_update.add_argument("--disabled", dest="enabled", action="store_false", default=True)
+    bundle_update.set_defaults(
+        method="PUT",
+        body_builder=bundle_update_body,
+        required_capabilities=["bundles.update"],
+    )
+
+    bundle_remove = bundle_commands.add_parser("remove")
+    bundle_remove.add_argument("bundle")
+    bundle_remove.add_argument("--refresh", action="store_true")
+    bundle_remove.set_defaults(
+        method="DELETE",
+        body_builder=bundle_remove_body,
+        required_capabilities=["bundles.remove"],
+    )
+
     models = subparsers.add_parser("models")
     model_commands = models.add_subparsers(dest="models_command", required=True)
 
@@ -236,6 +284,8 @@ def build_body(args: argparse.Namespace, stdin: TextIO, stderr: TextIO) -> dict[
             args.path = f"/api/v1/query/{path_quote(args.model)}/{args.query_action}"
         elif getattr(args, "models_command", None) == "describe":
             args.path = f"/api/v1/models/{path_quote(args.model)}/describe"
+    if getattr(args, "bundles_command", None) in {"update", "remove"}:
+        args.path = f"/api/v1/bundles/{path_quote(args.bundle)}"
     try:
         return args.body_builder(args, stdin)
     except (OSError, ValueError) as exc:
@@ -245,6 +295,45 @@ def build_body(args: argparse.Namespace, stdin: TextIO, stderr: TextIO) -> dict[
 
 def no_body(_args: argparse.Namespace, _stdin: TextIO) -> None:
     return None
+
+
+def bundle_add_body(args: argparse.Namespace, _stdin: TextIO) -> dict[str, Any]:
+    body: dict[str, Any] = {
+        "name": args.name,
+        "path": args.bundle_path,
+        "watch": args.watch,
+        "replace": args.replace,
+        "validate": args.validate,
+        "refresh": args.refresh,
+        "enabled": args.enabled,
+    }
+    if args.namespace:
+        body["namespace"] = args.namespace
+    return body
+
+
+def bundle_update_body(args: argparse.Namespace, _stdin: TextIO) -> dict[str, Any]:
+    body: dict[str, Any] = {
+        "name": args.bundle,
+        "path": args.bundle_path,
+        "watch": args.watch,
+        "replace": True,
+        "validate": args.validate,
+        "refresh": args.refresh,
+        "enabled": args.enabled,
+    }
+    if args.namespace:
+        body["namespace"] = args.namespace
+    return body
+
+
+def bundle_remove_body(args: argparse.Namespace, _stdin: TextIO) -> dict[str, Any] | None:
+    if not args.refresh and not args.namespace:
+        return None
+    body: dict[str, Any] = {"refresh": args.refresh}
+    if args.namespace:
+        body["namespace"] = args.namespace
+    return body
 
 
 def describe_body(args: argparse.Namespace, _stdin: TextIO) -> dict[str, Any]:
