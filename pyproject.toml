@@ -8,10 +8,28 @@ version = "0.1.0"
 description = "Standalone CLI for Foggy Runtime API v1"
 readme = "README.md"
 requires-python = ">=3.11"
+license = {text = "Apache-2.0"}
 authors = [
     {name = "Foggy Team"}
 ]
 dependencies = []
+keywords = ["foggy", "runtime-api", "semantic-layer", "mcp", "cli"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: Apache Software License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Database",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+]
+
+[project.urls]
+Homepage = "https://github.com/foggy-projects/foggy-runtime-cli"
+Repository = "https://github.com/foggy-projects/foggy-runtime-cli"
+Issues = "https://github.com/foggy-projects/foggy-runtime-cli/issues"
 
 [project.scripts]
 foggy-runtime = "foggy_runtime_cli.main:console_main"
@@ -19,3 +37,12 @@ foggy-runtime = "foggy_runtime_cli.main:console_main"
 [tool.hatch.build.targets.wheel]
 packages = ["src/foggy_runtime_cli"]
 
+[tool.hatch.build.targets.sdist]
+include = [
+    "/README.md",
+    "/LICENSE",
+    "/pyproject.toml",
+    "/src",
+    "/tests",
+    "/scripts",
+]

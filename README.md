@@ -4,6 +4,47 @@ Standalone CLI for `Foggy Runtime API v1`.
 
 The CLI talks only to `/api/v1/*` runtime endpoints. It does not call Java or Python engine private routes.
 
+## Installation
+
+From a released wheel:
+
+```powershell
+python -m pip install foggy_runtime_cli-0.1.0-py3-none-any.whl
+foggy-runtime --help
+```
+
+From source:
+
+```powershell
+git clone https://github.com/foggy-projects/foggy-runtime-cli.git
+cd foggy-runtime-cli
+python -m pip install .
+foggy-runtime --help
+```
+
+## Release Packaging
+
+Build local release artifacts:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\build-release.ps1 -Clean
+```
+
+Linux/macOS:
+
+```bash
+bash scripts/build-release.sh --clean
+```
+
+The release build runs tests by default, builds wheel and sdist artifacts into `dist/`, then writes `dist/SHA256SUMS` and `dist/release-manifest.json`.
+
+GitHub releases are created from tags by `.github/workflows/release.yml`:
+
+```powershell
+git tag -a v0.1.0 -m "Release v0.1.0"
+git push origin v0.1.0
+```
+
 ## Examples
 
 ```powershell
