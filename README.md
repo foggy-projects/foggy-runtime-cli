@@ -9,7 +9,7 @@ The CLI talks only to `/api/v1/*` runtime endpoints. It does not call Java or Py
 Windows PowerShell from GitHub Release:
 
 ```powershell
-$version = "0.1.1"
+$version = "0.1.2"
 $download = Join-Path $env:TEMP "foggy-runtime-cli-install-$version"
 New-Item -ItemType Directory -Force -Path $download | Out-Null
 Invoke-WebRequest `
@@ -23,7 +23,7 @@ python -m pip show foggy-runtime-cli
 Linux/macOS from GitHub Release:
 
 ```bash
-version="0.1.1"
+version="0.1.2"
 download="${TMPDIR:-/tmp}/foggy-runtime-cli-install-$version"
 mkdir -p "$download"
 curl -fsSL "https://github.com/foggy-projects/foggy-runtime-cli/releases/download/v$version/install-foggy-runtime-cli.sh" -o "$download/install-foggy-runtime-cli.sh"
@@ -35,7 +35,7 @@ python -m pip show foggy-runtime-cli
 From a released wheel:
 
 ```powershell
-python -m pip install foggy_runtime_cli-0.1.1-py3-none-any.whl
+python -m pip install foggy_runtime_cli-0.1.2-py3-none-any.whl
 foggy-runtime --help
 ```
 
@@ -69,8 +69,8 @@ The release build runs tests by default, builds wheel and sdist artifacts into `
 GitHub releases are created from tags by `.github/workflows/release.yml`:
 
 ```powershell
-git tag -a v0.1.1 -m "Release v0.1.1"
-git push origin v0.1.1
+git tag -a v0.1.2 -m "Release v0.1.2"
+git push origin v0.1.2
 ```
 
 Release assets include:
@@ -81,6 +81,12 @@ Release assets include:
 - `release-manifest.json`
 - `install-foggy-runtime-cli.ps1`
 - `install-foggy-runtime-cli.sh`
+
+For `v0.1.2` and later, the public CLI release can also carry companion `foggy-ai-analysis-demo` Skill assets uploaded from the workspace packaging script:
+
+- `foggy-ai-analysis-demo-skill-<version>.zip`
+- `foggy-ai-analysis-demo-skill-<version>-manifest.json`
+- `foggy-ai-analysis-demo-skill-<version>-SHA256SUMS`
 
 ## Examples
 

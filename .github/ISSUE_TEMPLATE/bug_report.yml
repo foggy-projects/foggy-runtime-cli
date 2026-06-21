@@ -13,7 +13,7 @@ body:
     attributes:
       label: CLI version
       description: Release tag, wheel version, or commit.
-      placeholder: v0.1.1
+      placeholder: v0.1.2
     validations:
       required: true
   - type: input

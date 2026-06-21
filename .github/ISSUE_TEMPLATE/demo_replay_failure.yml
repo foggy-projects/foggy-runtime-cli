@@ -13,14 +13,14 @@ body:
     id: cli-version
     attributes:
       label: CLI release
-      placeholder: v0.1.1
+      placeholder: v0.1.2
     validations:
       required: true
   - type: input
     id: skill-version
     attributes:
       label: Skill release
-      placeholder: foggy-ai-analysis-demo-skill-v0.1.1
+      placeholder: foggy-ai-analysis-demo-skill-0.1.2 from v0.1.2 public CLI release
     validations:
       required: true
   - type: input
