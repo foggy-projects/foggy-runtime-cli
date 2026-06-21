@@ -1,0 +1,77 @@
+name: Demo replay failure
+description: Report a release-installed Foggy AI analysis demo replay failure.
+title: "[Demo Replay]: "
+labels:
+  - demo
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this when the sales-drop install-state or replay flow fails with release-installed CLI assets.
+  - type: input
+    id: cli-version
+    attributes:
+      label: CLI release
+      placeholder: v0.1.1
+    validations:
+      required: true
+  - type: input
+    id: skill-version
+    attributes:
+      label: Skill release
+      placeholder: foggy-ai-analysis-demo-skill-v0.1.1
+    validations:
+      required: true
+  - type: input
+    id: runtime-url
+    attributes:
+      label: Runtime URL
+      placeholder: http://127.0.0.1:18066
+    validations:
+      required: true
+  - type: input
+    id: namespace
+    attributes:
+      label: Namespace
+      placeholder: salesdrop
+    validations:
+      required: true
+  - type: input
+    id: launcher
+    attributes:
+      label: Launcher source
+      description: Local jar path, Docker image, or other runtime source.
+      placeholder: D:\...\foggy-mcp-launcher-9.1.0.beta.jar
+    validations:
+      required: true
+  - type: textarea
+    id: command
+    attributes:
+      label: Replay command
+      render: shell
+    validations:
+      required: true
+  - type: textarea
+    id: failure
+    attributes:
+      label: Failure point
+      description: Name the first failed step and include exit code or error code.
+      render: text
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Evidence files or excerpts
+      description: Include summary.json, question-bank-replay.json, command-status.csv, runtime-log classification, and sanitized stdout/stderr snippets when available.
+      render: text
+    validations:
+      required: true
+  - type: textarea
+    id: boundary
+    attributes:
+      label: Boundary notes
+      description: Mention whether this is dev/test Runtime API and whether production permission is involved.
+    validations:
+      required: false

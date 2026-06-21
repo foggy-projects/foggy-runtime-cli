@@ -1,0 +1,69 @@
+name: CLI bug report
+description: Report a foggy-runtime-cli install, command, output, or exit-code bug.
+title: "[Bug]: "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this for CLI install scripts, wheel packaging, command parsing, Runtime API client behavior, JSON output, or exit-code issues.
+  - type: input
+    id: cli-version
+    attributes:
+      label: CLI version
+      description: Release tag, wheel version, or commit.
+      placeholder: v0.1.1
+    validations:
+      required: true
+  - type: input
+    id: os
+    attributes:
+      label: OS and shell
+      placeholder: Windows 11 PowerShell 7.5
+    validations:
+      required: true
+  - type: input
+    id: python
+    attributes:
+      label: Python version
+      placeholder: Python 3.11.5
+    validations:
+      required: true
+  - type: textarea
+    id: command
+    attributes:
+      label: Command
+      description: Paste the exact command and exit code.
+      render: shell
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+      description: Include sanitized stdout/stderr or JSON output.
+      render: text
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Evidence
+      description: Attach or paste relevant logs, checksums, command-status rows, or Runtime API envelope fragments. Remove secrets.
+      render: text
+    validations:
+      required: false
+  - type: textarea
+    id: notes
+    attributes:
+      label: Notes
+      description: Mention whether capabilities, wait-ready, or a direct Runtime API call succeeded.
+    validations:
+      required: false

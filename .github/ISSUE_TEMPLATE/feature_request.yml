@@ -1,0 +1,43 @@
+name: Feature request
+description: Request a foggy-runtime-cli or Runtime API workflow improvement.
+title: "[Feature]: "
+labels:
+  - enhancement
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What workflow is hard or missing?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed behavior
+      description: Describe the command, output, or Runtime API capability you want.
+    validations:
+      required: true
+  - type: textarea
+    id: current
+    attributes:
+      label: Current workaround
+      description: Include commands or scripts currently used, if any.
+      render: shell
+    validations:
+      required: false
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - install/release
+        - runtime readiness
+        - datasource/table/sql
+        - bundles/resources
+        - models/query
+        - compose/fsscript
+        - demo workflow
+        - other
+    validations:
+      required: true
