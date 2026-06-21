@@ -9,21 +9,21 @@ The CLI talks only to `/api/v1/*` runtime endpoints. It does not call Java or Py
 Windows PowerShell from GitHub Release:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\install-foggy-runtime-cli.ps1 -Version 0.1.0
+powershell -ExecutionPolicy Bypass -File .\install-foggy-runtime-cli.ps1 -Version 0.1.1
 foggy-runtime --help
 ```
 
 Linux/macOS from GitHub Release:
 
 ```bash
-bash install-foggy-runtime-cli.sh --version 0.1.0
+bash install-foggy-runtime-cli.sh --version 0.1.1
 foggy-runtime --help
 ```
 
 From a released wheel:
 
 ```powershell
-python -m pip install foggy_runtime_cli-0.1.0-py3-none-any.whl
+python -m pip install foggy_runtime_cli-0.1.1-py3-none-any.whl
 foggy-runtime --help
 ```
 
@@ -55,8 +55,8 @@ The release build runs tests by default, builds wheel and sdist artifacts into `
 GitHub releases are created from tags by `.github/workflows/release.yml`:
 
 ```powershell
-git tag -a v0.1.0 -m "Release v0.1.0"
-git push origin v0.1.0
+git tag -a v0.1.1 -m "Release v0.1.1"
+git push origin v0.1.1
 ```
 
 Release assets include:
