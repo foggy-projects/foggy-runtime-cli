@@ -386,6 +386,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="Workspace root containing the demo skill.",
     )
     sales_drop_plan.add_argument(
+        "--skill-dir",
+        help="Path to an unpacked foggy-ai-analysis-demo skill directory. "
+        "Defaults to <repo-root>/.codex/skills/foggy-ai-analysis-demo.",
+    )
+    sales_drop_plan.add_argument(
         "--port",
         type=int,
         default=18066,
@@ -848,7 +853,11 @@ def safe_resource_output_path(root: Path, relative: str) -> Path:
 
 def demo_sales_drop_plan(args: argparse.Namespace) -> dict[str, Any]:
     repo_root = Path(args.repo_root).resolve()
-    skill_dir = repo_root / ".codex" / "skills" / "foggy-ai-analysis-demo"
+    skill_dir = (
+        Path(args.skill_dir).resolve()
+        if args.skill_dir
+        else repo_root / ".codex" / "skills" / "foggy-ai-analysis-demo"
+    )
     demo_dir = skill_dir / "assets" / "sales-drop-demo"
     schema = demo_dir / "schema.sql"
     data = demo_dir / "data.sql"
@@ -889,6 +898,8 @@ def demo_sales_drop_plan(args: argparse.Namespace) -> dict[str, Any]:
             "engine": "local",
             "data": {
                 "repoRoot": str(repo_root),
+                "skillDir": str(skill_dir),
+                "demoDir": str(demo_dir),
                 "missingAssets": missing_assets,
             },
             "error": {
@@ -1001,6 +1012,8 @@ def demo_sales_drop_plan(args: argparse.Namespace) -> dict[str, Any]:
         "data": {
             "demo": "sales-drop",
             "repoRoot": str(repo_root),
+            "skillDir": str(skill_dir),
+            "demoDir": str(demo_dir),
             "baseUrl": base_url,
             "namespace": namespace,
             "port": args.port,

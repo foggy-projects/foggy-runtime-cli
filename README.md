@@ -92,6 +92,7 @@ foggy-runtime fsscript run --script workflow.fsscript
 foggy-runtime fsscript run --script workflow.fsscript --enable-cte-bridge
 foggy-runtime tables inspect --table sale_order --schema public --include-indexes
 foggy-runtime demo sales-drop plan --repo-root D:\foggy-projects\foggy-data-mcp --port 18066
+foggy-runtime demo sales-drop plan --repo-root D:\foggy-projects\foggy-data-mcp --skill-dir D:\demo\skills\foggy-ai-analysis-demo --port 18066
 ```
 
 JSON output is the default and preserves the Runtime API envelope for Skill consumption.
@@ -156,3 +157,5 @@ The preflight checks Java/Python availability, source-layout CLI import, bundled
 - `query execute`.
 
 If the launcher JAR is missing, the command still returns a plan with a warning so a clean workspace can tell the user to build `foggy-mcp-launcher` or pass `--launcher-jar`.
+
+Use `--skill-dir` when the Skill was downloaded from a release zip and unpacked outside the workspace `.codex\skills` directory. The plan output includes both `skillDir` and `demoDir` so automation can verify which asset copy is being used.
