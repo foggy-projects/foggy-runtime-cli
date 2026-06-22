@@ -113,6 +113,7 @@ foggy-runtime fsscript run --script workflow.fsscript --enable-cte-bridge
 foggy-runtime tables inspect --table sale_order --schema public --include-indexes
 foggy-runtime demo sales-drop plan --repo-root D:\foggy-projects\foggy-data-mcp --port 18066
 foggy-runtime demo sales-drop plan --repo-root D:\foggy-projects\foggy-data-mcp --skill-dir D:\demo\skills\foggy-ai-analysis-demo --port 18066
+foggy-runtime --base-url http://127.0.0.1:18066 demo sales-drop replay --skill-dir D:\demo\skills\foggy-ai-analysis-demo --evidence-dir D:\demo\evidence --sqlite-path D:\demo\runtime\sales_drop_demo.sqlite --use-default-datasource
 ```
 
 JSON output is the default and preserves the Runtime API envelope for Skill consumption.
@@ -179,6 +180,51 @@ The preflight checks Java/Python availability, source-layout CLI import, bundled
 If the launcher JAR is missing, the command still returns a plan with a warning so a clean workspace can tell the user to build `foggy-mcp-launcher` or pass `--launcher-jar`.
 
 Use `--skill-dir` when the Skill was downloaded from a release zip and unpacked outside the workspace `.codex\skills` directory. The plan output includes both `skillDir` and `demoDir` so automation can verify which asset copy is being used.
+
+## No-Workspace Sales-Drop Replay
+
+`demo sales-drop replay` is a public-onboarding helper for an already running Runtime API. It does not require a `foggy-runtime-cli` source checkout or the workspace PowerShell replay script.
+
+Inputs:
+
+- A running Java lite Runtime API, usually `http://127.0.0.1:18066`.
+- An unpacked `foggy-ai-analysis-demo` Skill directory from the release zip.
+- The same SQLite file path used by the running runtime default datasource when `--use-default-datasource` is set.
+- Optional `--evidence-dir`; otherwise evidence is written under `.foggy-demo/sales-drop-replay-<stamp>`.
+
+Example:
+
+```powershell
+foggy-runtime --base-url http://127.0.0.1:18066 demo sales-drop replay `
+  --skill-dir D:\demo\skills\foggy-ai-analysis-demo `
+  --evidence-dir D:\demo\evidence\sales-drop-replay `
+  --sqlite-path D:\demo\runtime\sales_drop_demo.sqlite `
+  --use-default-datasource
+```
+
+With current Java runtimes, use `--use-default-datasource` and start Java with the same SQLite file:
+
+```powershell
+java -Dfile.encoding=UTF-8 -jar foggy-mcp-launcher-9.1.0.beta-runtime-api.jar `
+  --server.port=18066 `
+  --spring.profiles.active=lite `
+  --foggy.runtime-api.enabled=true `
+  --spring.datasource.url=jdbc:sqlite:D:\demo\runtime\sales_drop_demo.sqlite
+```
+
+This mode seeds the bundled SQLite fixture into the runtime default datasource, tests that datasource, inspects the table, runs a read-only SQL sample, validates and registers the bundled TM/QM bundle, refreshes and describes `SalesDropDailyQueryModel`, executes the basic query, and replays the bundled question bank.
+
+The command also supports Runtime API-managed datasource registration without `--use-default-datasource`. That path is useful for table/SQL exploration, but current Java model validation still reads the runtime default datasource; keep the default datasource mode for end-to-end sales-drop replay until the Runtime API model/query layer consumes namespace datasource bindings.
+
+Evidence files:
+
+- `summary.json`
+- `command-status.json`
+- `question-bank-replay.json`
+- `cli-sales-drop-replay-report.md`
+- `logs\*.json`
+
+The command expects the Runtime API to report `securityMode=none-dev-test-only`. It is for trusted local dev/test onboarding. It does not download or start Java yet; keep using the released Java launcher scripts or the maintainer workspace replay when validating full install-state lifecycle.
 
 ## Feedback
 
