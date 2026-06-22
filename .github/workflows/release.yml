@@ -43,6 +43,25 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           tag="${GITHUB_REF_NAME}"
+          cat > release-notes.md <<EOF
+          Foggy Runtime CLI release ${tag}.
+
+          Assets include the wheel, sdist, install scripts, SHA256SUMS, and release-manifest.json.
+
+          Public Foggy AI analysis demo onboarding uses three release inputs:
+
+          1. Install this CLI release.
+          2. Download the foggy-ai-analysis-demo Skill companion assets from this release when present.
+          3. Download the Java Runtime API launcher from https://github.com/foggy-projects/foggy-data-mcp-bridge/releases.
+
+          The sales-drop public demo should run with the Java runtime default SQLite datasource and:
+
+          \`\`\`powershell
+          foggy-runtime --base-url http://127.0.0.1:18066 demo sales-drop replay --skill-dir <unzipped-skill> --evidence-dir <evidence> --sqlite-path <runtime-default-sqlite> --use-default-datasource
+          \`\`\`
+
+          Runtime API launcher releases are dev/test-only. Production permission, auth, RBAC, audit, and governance remain a later phase.
+          EOF
           gh release create "$tag" \
             dist/*.whl \
             dist/*.tar.gz \
@@ -51,4 +70,4 @@ jobs:
             scripts/install-foggy-runtime-cli.ps1 \
             scripts/install-foggy-runtime-cli.sh \
             --title "Foggy Runtime CLI ${tag}" \
-            --notes "Foggy Runtime CLI release ${tag}. Assets include wheel, sdist, install scripts, SHA256SUMS, and release-manifest.json."
+            --notes-file release-notes.md
