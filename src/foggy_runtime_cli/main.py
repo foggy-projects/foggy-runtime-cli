@@ -3,8 +3,11 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
+import sqlite3
 import sys
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, TextIO
 
@@ -36,6 +39,8 @@ def main(
 
     parser = build_parser()
     args = parser.parse_args(argv)
+    if args.namespace is None and getattr(args, "default_namespace", None):
+        args.namespace = args.default_namespace
 
     local_handler = getattr(args, "local_handler", None)
     if local_handler is not None:
@@ -401,6 +406,42 @@ def build_parser() -> argparse.ArgumentParser:
     sales_drop_plan.add_argument("--models-dir", help="Sales-drop TM/QM model directory.")
     sales_drop_plan.add_argument("--query-payload", help="Sales-drop query payload path.")
     sales_drop_plan.set_defaults(local_handler=demo_sales_drop_plan)
+
+    sales_drop_replay = sales_drop_commands.add_parser("replay")
+    sales_drop_replay.add_argument(
+        "--skill-dir",
+        required=True,
+        help="Path to an unpacked foggy-ai-analysis-demo skill directory.",
+    )
+    sales_drop_replay.add_argument(
+        "--evidence-dir",
+        help="Directory where replay evidence will be written. Defaults to .foggy-demo/sales-drop-replay-<stamp>.",
+    )
+    sales_drop_replay.add_argument("--sqlite-path", help="SQLite database path to seed and register.")
+    sales_drop_replay.add_argument("--models-dir", help="Sales-drop TM/QM model directory.")
+    sales_drop_replay.add_argument("--query-payload", help="Basic sales-drop query payload path.")
+    sales_drop_replay.add_argument("--question-bank", help="Question-bank JSON path.")
+    sales_drop_replay.add_argument("--data-source-name", default="sales-drop-sqlite")
+    sales_drop_replay.add_argument(
+        "--use-default-datasource",
+        action="store_true",
+        help=(
+            "Seed --sqlite-path and use the runtime default datasource instead of registering a new datasource. "
+            "Use this with current Java runtimes where model validation still reads the default datasource."
+        ),
+    )
+    sales_drop_replay.add_argument("--bundle-name", default="sales-drop-models")
+    sales_drop_replay.add_argument("--ready-timeout-seconds", type=float, default=120.0)
+    sales_drop_replay.add_argument("--ready-interval-seconds", type=float, default=2.0)
+    sales_drop_replay.add_argument(
+        "--skip-question-bank",
+        action="store_true",
+        help="Run only the core sales-drop smoke sequence.",
+    )
+    sales_drop_replay.set_defaults(
+        runtime_handler=demo_sales_drop_replay,
+        default_namespace="salesdrop",
+    )
 
     return parser
 
@@ -1026,6 +1067,855 @@ def demo_sales_drop_plan(args: argparse.Namespace) -> dict[str, Any]:
             "commands": commands,
         },
     }
+
+
+class DemoReplayFailure(Exception):
+    """Raised after replay evidence has been recorded for a failed step."""
+
+
+def demo_sales_drop_replay(
+    args: argparse.Namespace,
+    client: Any,
+    base_url: str,
+) -> tuple[dict[str, Any], int]:
+    namespace = args.namespace or "salesdrop"
+    skill_dir = Path(args.skill_dir).resolve()
+    demo_dir = skill_dir / "assets" / "sales-drop-demo"
+    schema = demo_dir / "schema.sql"
+    data = demo_dir / "data.sql"
+    models_dir = Path(args.models_dir).resolve() if args.models_dir else demo_dir / "models"
+    query_payload = (
+        Path(args.query_payload).resolve()
+        if args.query_payload
+        else demo_dir / "queries" / "basic.json"
+    )
+    question_bank = (
+        Path(args.question_bank).resolve()
+        if args.question_bank
+        else demo_dir / "question-bank.json"
+    )
+
+    stamp = time.strftime("%Y%m%d-%H%M%S")
+    evidence_dir = (
+        Path(args.evidence_dir).resolve()
+        if args.evidence_dir
+        else Path.cwd().resolve() / ".foggy-demo" / f"sales-drop-replay-{stamp}"
+    )
+    sqlite_path = (
+        Path(args.sqlite_path).resolve()
+        if args.sqlite_path
+        else evidence_dir / "sales_drop_demo.sqlite"
+    )
+    use_default_datasource = bool(args.use_default_datasource)
+    if use_default_datasource and not args.sqlite_path:
+        return (
+            {
+                "success": False,
+                "engine": "local",
+                "data": {
+                    "runtimeUrl": base_url,
+                    "namespace": namespace,
+                    "skillDir": str(skill_dir),
+                    "evidenceDir": str(evidence_dir),
+                },
+                "error": {
+                    "code": "DEMO_SQLITE_PATH_REQUIRED",
+                    "phase": "demo.sales-drop.replay",
+                    "message": (
+                        "--use-default-datasource requires --sqlite-path. Pass the same SQLite file path "
+                        "used by the running Runtime API default datasource."
+                    ),
+                    "safeToAutoRepair": False,
+                },
+            },
+            EXIT_CLI_ERROR,
+        )
+    if not use_default_datasource and args.data_source_name == "default":
+        return (
+            {
+                "success": False,
+                "engine": "local",
+                "data": {
+                    "runtimeUrl": base_url,
+                    "namespace": namespace,
+                    "skillDir": str(skill_dir),
+                    "evidenceDir": str(evidence_dir),
+                },
+                "error": {
+                    "code": "DEMO_DEFAULT_DATASOURCE_MODE_REQUIRED",
+                    "phase": "demo.sales-drop.replay",
+                    "message": (
+                        "The runtime default datasource cannot be registered through datasources add. "
+                        "Use --use-default-datasource with --sqlite-path instead."
+                    ),
+                    "safeToAutoRepair": False,
+                },
+            },
+            EXIT_CLI_ERROR,
+        )
+    data_source_name = "default" if use_default_datasource else args.data_source_name
+    data_source_mode = "default" if use_default_datasource else "runtime-managed"
+    data_source_slug = demo_safe_name(data_source_name)
+
+    required_assets = {
+        "skill": skill_dir,
+        "schema": schema,
+        "data": data,
+        "modelsDir": models_dir,
+        "queryPayload": query_payload,
+    }
+    if not args.skip_question_bank:
+        required_assets["questionBank"] = question_bank
+    missing_assets = [name for name, path in required_assets.items() if not path.exists()]
+    if missing_assets:
+        return (
+            {
+                "success": False,
+                "engine": "local",
+                "data": {
+                    "skillDir": str(skill_dir),
+                    "demoDir": str(demo_dir),
+                    "missingAssets": missing_assets,
+                },
+                "error": {
+                    "code": "DEMO_ASSET_MISSING",
+                    "phase": "demo.sales-drop.replay",
+                    "message": "Required sales-drop demo assets are missing.",
+                    "safeToAutoRepair": False,
+                },
+            },
+            EXIT_API_ERROR,
+        )
+
+    evidence_dir.mkdir(parents=True, exist_ok=True)
+    logs_dir = evidence_dir / "logs"
+    logs_dir.mkdir(parents=True, exist_ok=True)
+    command_status_path = evidence_dir / "command-status.json"
+    question_replay_path = evidence_dir / "question-bank-replay.json"
+    summary_path = evidence_dir / "summary.json"
+    report_path = evidence_dir / "cli-sales-drop-replay-report.md"
+
+    started_at = time.monotonic()
+    results: list[dict[str, Any]] = []
+    question_bank_summary: dict[str, Any] | None = None
+    failure_message = ""
+
+    try:
+        seed_response = demo_seed_sales_drop_sqlite(sqlite_path, schema, data)
+        seed_result = demo_record_step(results, logs_dir, "seed-sales-drop-sqlite", seed_response)
+        if seed_result["result"] != "passed":
+            raise DemoReplayFailure("seed-sales-drop-sqlite failed.")
+
+        ready_args = argparse.Namespace(
+            timeout_seconds=args.ready_timeout_seconds,
+            interval_seconds=args.ready_interval_seconds,
+            namespace=namespace,
+        )
+        ready_response, ready_code = wait_ready_handler(ready_args, client, base_url)
+        ready_result = demo_record_step(results, logs_dir, "wait-ready", ready_response)
+        if ready_code != EXIT_OK or ready_result["result"] != "passed":
+            raise DemoReplayFailure("wait-ready failed.")
+
+        demo_run_required_step(
+            client,
+            results,
+            logs_dir,
+            "capabilities",
+            "GET",
+            "/api/v1/capabilities",
+            None,
+            lambda response: demo_validate_capabilities_response(
+                response,
+                managed_datasource=not use_default_datasource,
+            ),
+        )
+        if use_default_datasource:
+            demo_run_required_step(
+                client,
+                results,
+                logs_dir,
+                "datasources-test-default",
+                "POST",
+                f"/api/v1/datasources/{path_quote(data_source_name)}/test",
+                None,
+            )
+        else:
+            demo_run_required_step(
+                client,
+                results,
+                logs_dir,
+                f"datasources-add-{data_source_slug}",
+                "POST",
+                "/api/v1/datasources",
+                {
+                    "name": data_source_name,
+                    "type": "sqlite",
+                    "jdbcUrl": f"jdbc:sqlite:{sqlite_path}",
+                    "replace": True,
+                    "enabled": True,
+                },
+            )
+            demo_run_required_step(
+                client,
+                results,
+                logs_dir,
+                f"datasources-test-{data_source_slug}",
+                "POST",
+                f"/api/v1/datasources/{path_quote(data_source_name)}/test",
+                None,
+            )
+            demo_run_required_step(
+                client,
+                results,
+                logs_dir,
+                f"datasources-bind-{demo_safe_name(namespace)}-{data_source_slug}",
+                "PUT",
+                f"/api/v1/namespaces/{path_quote(namespace)}/datasource",
+                {"namespace": namespace, "dataSource": data_source_name},
+            )
+        demo_run_required_step(
+            client,
+            results,
+            logs_dir,
+            f"tables-list-{data_source_slug}",
+            "POST",
+            "/api/v1/tables/list",
+            {"includeViews": True, "dataSource": data_source_name},
+        )
+        demo_run_required_step(
+            client,
+            results,
+            logs_dir,
+            "tables-inspect-sales_drop_daily",
+            "POST",
+            "/api/v1/tables/inspect",
+            {
+                "table": "sales_drop_daily",
+                "includeIndexes": True,
+                "includeForeignKeys": False,
+                "dataSource": data_source_name,
+            },
+        )
+        demo_run_required_step(
+            client,
+            results,
+            logs_dir,
+            "sql-query-sales-drop-top5",
+            "POST",
+            "/api/v1/sql/query",
+            {
+                "sql": (
+                    "select sales_drop_id, observation_date, region, channel, severity, root_cause, "
+                    "sales_drop_amount, sales_drop_rate from sales_drop_daily "
+                    "order by sales_drop_amount desc"
+                ),
+                "dataSource": data_source_name,
+                "maxRows": 5,
+                "timeoutSeconds": 5,
+            },
+        )
+        demo_run_required_step(
+            client,
+            results,
+            logs_dir,
+            "models-validate",
+            "POST",
+            "/api/v1/models/validate",
+            {
+                "path": str(models_dir),
+                "watch": False,
+                "clearExisting": True,
+                "includeStackTrace": False,
+                "namespace": namespace,
+            },
+            demo_validate_models_validate_response,
+        )
+        demo_run_required_step(client, results, logs_dir, "bundles-list-before-add", "GET", "/api/v1/bundles", None)
+        demo_run_required_step(
+            client,
+            results,
+            logs_dir,
+            "bundles-add-sales-drop-models",
+            "POST",
+            "/api/v1/bundles",
+            {
+                "name": args.bundle_name,
+                "path": str(models_dir),
+                "watch": True,
+                "replace": True,
+                "validate": False,
+                "refresh": False,
+                "enabled": True,
+                "namespace": namespace,
+            },
+        )
+        demo_run_required_step(
+            client,
+            results,
+            logs_dir,
+            "models-refresh",
+            "POST",
+            "/api/v1/models/refresh",
+            {"namespace": namespace},
+            demo_validate_models_refresh_response,
+        )
+        demo_run_required_step(
+            client,
+            results,
+            logs_dir,
+            "models-describe-SalesDropDailyQueryModel",
+            "POST",
+            "/api/v1/models/SalesDropDailyQueryModel/describe",
+            {"namespace": namespace},
+        )
+        basic_payload = demo_read_json_object(query_payload)
+        demo_run_required_step(
+            client,
+            results,
+            logs_dir,
+            "query-validate-basic",
+            "POST",
+            "/api/v1/query/SalesDropDailyQueryModel/validate",
+            basic_payload,
+        )
+        demo_run_required_step(
+            client,
+            results,
+            logs_dir,
+            "query-execute-basic",
+            "POST",
+            "/api/v1/query/SalesDropDailyQueryModel/execute",
+            basic_payload,
+        )
+
+        if not args.skip_question_bank:
+            question_bank_summary = demo_replay_sales_drop_question_bank(
+                client,
+                results,
+                logs_dir,
+                demo_dir,
+                models_dir,
+                question_bank,
+                question_replay_path,
+            )
+            if int(question_bank_summary.get("failed", 0)) > 0:
+                raise DemoReplayFailure(
+                    f"question-bank replay has {question_bank_summary['failed']} failed case(s)."
+                )
+
+    except DemoReplayFailure as exc:
+        failure_message = str(exc)
+    except (OSError, RuntimeTransportError, ValueError, sqlite3.Error) as exc:
+        failure_message = str(exc)
+
+    elapsed_ms = int((time.monotonic() - started_at) * 1000)
+    failed_results = [item for item in results if item.get("result") != "passed"]
+    final_status = "passed" if not failure_message and not failed_results else "failed"
+    summary = {
+        "schemaVersion": "foggy-demo-evidence/v1",
+        "generatedAt": demo_now_iso(),
+        "mode": "cli-sales-drop-replay",
+        "status": final_status,
+        "failure": failure_message or None,
+        "runtimeUrl": base_url,
+        "runtimePort": demo_runtime_port(base_url),
+        "namespace": namespace,
+        "dataSource": data_source_name,
+        "dataSourceMode": data_source_mode,
+        "bundle": args.bundle_name,
+        "elapsedMs": elapsed_ms,
+        "evidenceDir": str(evidence_dir),
+        "skillDir": str(skill_dir),
+        "demoDir": str(demo_dir),
+        "sqlitePath": str(sqlite_path),
+        "modelsDir": str(models_dir),
+        "queryPayload": str(query_payload),
+        "questionBankPath": str(question_bank) if not args.skip_question_bank else None,
+        "questionBankEvidence": str(question_replay_path) if question_bank_summary else None,
+        "questionBankSummary": question_bank_summary,
+        "commandStatus": str(command_status_path),
+        "report": str(report_path),
+        "results": results,
+        "notes": [
+            "This command uses an unpacked foggy-ai-analysis-demo Skill directory and a running Runtime API.",
+            "It does not require a foggy-runtime-cli source checkout or workspace wrapper script.",
+            "This replay is for trusted local dev/test use with Runtime API securityMode=none-dev-test-only.",
+            "Production permission, auth, RBAC, audit, and governance remain deferred.",
+        ],
+    }
+    demo_write_json(command_status_path, {"schemaVersion": "foggy-demo-command-status/v1", "results": results})
+    demo_write_json(summary_path, summary)
+    demo_write_replay_report(report_path, summary)
+
+    response: dict[str, Any] = {
+        "success": final_status == "passed",
+        "engine": "local",
+        "data": {
+            "status": final_status,
+            "runtimeUrl": base_url,
+            "namespace": namespace,
+            "evidenceDir": str(evidence_dir),
+            "summary": str(summary_path),
+            "report": str(report_path),
+            "commandStatus": str(command_status_path),
+            "questionBankSummary": question_bank_summary,
+        },
+    }
+    if final_status != "passed":
+        response["error"] = {
+            "code": "DEMO_REPLAY_FAILED",
+            "phase": "demo.sales-drop.replay",
+            "message": failure_message or f"{len(failed_results)} replay step(s) failed.",
+            "safeToAutoRepair": False,
+        }
+        return response, EXIT_API_ERROR
+    return response, EXIT_OK
+
+
+def demo_seed_sales_drop_sqlite(sqlite_path: Path, schema_path: Path, data_path: Path) -> dict[str, Any]:
+    sqlite_path.parent.mkdir(parents=True, exist_ok=True)
+    schema = schema_path.read_text(encoding="utf-8")
+    data = data_path.read_text(encoding="utf-8")
+    connection = sqlite3.connect(str(sqlite_path))
+    try:
+        connection.executescript(schema)
+        connection.executescript(data)
+        connection.commit()
+    finally:
+        connection.close()
+    return {
+        "success": True,
+        "engine": "local",
+        "data": {
+            "sqlitePath": str(sqlite_path),
+            "schema": str(schema_path),
+            "data": str(data_path),
+        },
+    }
+
+
+def demo_run_required_step(
+    client: Any,
+    results: list[dict[str, Any]],
+    logs_dir: Path,
+    name: str,
+    method: str,
+    path: str,
+    body: dict[str, Any] | None,
+    validator: Callable[[dict[str, Any]], str] | None = None,
+) -> dict[str, Any]:
+    response, result = demo_run_runtime_step(client, results, logs_dir, name, method, path, body, validator)
+    if result["result"] != "passed":
+        message = result.get("validationMessage") or demo_response_error_message(response) or f"{name} failed."
+        raise DemoReplayFailure(message)
+    return response
+
+
+def demo_run_runtime_step(
+    client: Any,
+    results: list[dict[str, Any]],
+    logs_dir: Path,
+    name: str,
+    method: str,
+    path: str,
+    body: dict[str, Any] | None,
+    validator: Callable[[dict[str, Any]], str] | None = None,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    try:
+        response = client.request(method, path, body)
+    except RuntimeTransportError as exc:
+        response = {
+            "success": False,
+            "engine": "unknown",
+            "error": {
+                "code": "TRANSPORT_ERROR",
+                "phase": name,
+                "message": str(exc),
+                "safeToAutoRepair": False,
+            },
+        }
+    validation_message = validator(response) if validator else ""
+    result = demo_record_step(
+        results,
+        logs_dir,
+        name,
+        response,
+        validation_message=validation_message,
+        runtime_request={"method": method, "path": path, "body": body},
+    )
+    return response, result
+
+
+def demo_record_step(
+    results: list[dict[str, Any]],
+    logs_dir: Path,
+    name: str,
+    response: dict[str, Any],
+    validation_message: str = "",
+    runtime_request: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    step = len(results) + 1
+    output_path = logs_dir / f"{step:02d}-{demo_safe_name(name)}.json"
+    demo_write_json(output_path, response)
+    result = "passed" if response.get("success") is True and not validation_message else "failed"
+    row: dict[str, Any] = {
+        "step": step,
+        "name": name,
+        "result": result,
+        "output": str(output_path),
+        "validationMessage": validation_message,
+    }
+    if runtime_request is not None:
+        row["runtimeRequest"] = runtime_request
+    results.append(row)
+    return row
+
+
+def demo_replay_sales_drop_question_bank(
+    client: Any,
+    results: list[dict[str, Any]],
+    logs_dir: Path,
+    demo_dir: Path,
+    models_dir: Path,
+    question_bank_path: Path,
+    output_path: Path,
+) -> dict[str, Any]:
+    bank = demo_read_json_object(question_bank_path)
+    cases = bank.get("cases")
+    if not isinstance(cases, list):
+        raise ValueError(f"{question_bank_path} must contain a cases array")
+
+    query_model_file = demo_find_query_model_file(models_dir)
+    available_fields = demo_available_query_fields(query_model_file)
+    available_field_set = set(available_fields)
+    case_results: list[dict[str, Any]] = []
+
+    for case in cases:
+        if not isinstance(case, dict):
+            continue
+        case_id = str(case.get("id") or f"case-{len(case_results) + 1}")
+        declared_status = str(case.get("status") or "executable")
+        required_fields = [str(item) for item in case.get("requiredFields") or []]
+        missing_fields = [field for field in required_fields if field not in available_field_set]
+        case_result: dict[str, Any] = {
+            "id": case_id,
+            "question": case.get("question"),
+            "declaredStatus": declared_status,
+            "capabilitySet": case.get("capabilitySet"),
+            "decision": case.get("decision"),
+            "expectedBehavior": case.get("expectedBehavior"),
+            "requiredFields": required_fields,
+            "missingFields": missing_fields,
+            "payloadFile": case.get("payloadFile"),
+            "payload": None,
+            "sourcePayload": None,
+            "validate": None,
+            "execute": None,
+            "assertionMessage": "",
+            "skipReason": case.get("skipReason"),
+            "status": "pending",
+            "tuningNotes": [],
+        }
+
+        if missing_fields:
+            case_result["status"] = "fail"
+            case_result["tuningNotes"].append("Missing required fields in SalesDropDailyQueryModel.")
+            case_results.append(case_result)
+            continue
+
+        if declared_status != "executable":
+            case_result["status"] = declared_status
+            if case.get("skipReason"):
+                case_result["tuningNotes"].append(str(case["skipReason"]))
+            case_results.append(case_result)
+            continue
+
+        relative_payload = str(case.get("payloadFile") or "")
+        if not relative_payload:
+            case_result["status"] = "fail"
+            case_result["tuningNotes"].append(f"Question {case_id} does not define payloadFile.")
+            case_results.append(case_result)
+            continue
+        source_payload = (demo_dir / relative_payload).resolve()
+        if not source_payload.exists():
+            case_result["status"] = "fail"
+            case_result["tuningNotes"].append(f"Question {case_id} payloadFile not found: {source_payload}")
+            case_results.append(case_result)
+            continue
+
+        payload = demo_read_json_object(source_payload)
+        case_result["payload"] = str(source_payload)
+        case_result["sourcePayload"] = str(source_payload)
+        validate_response, validate_result = demo_run_runtime_step(
+            client,
+            results,
+            logs_dir,
+            f"question-{case_id}-validate",
+            "POST",
+            "/api/v1/query/SalesDropDailyQueryModel/validate",
+            payload,
+        )
+        case_result["validate"] = validate_result["output"]
+        execute_response: dict[str, Any] | None = None
+        execute_result: dict[str, Any] | None = None
+        if validate_result["result"] == "passed":
+            execute_response, execute_result = demo_run_runtime_step(
+                client,
+                results,
+                logs_dir,
+                f"question-{case_id}-execute",
+                "POST",
+                "/api/v1/query/SalesDropDailyQueryModel/execute",
+                payload,
+            )
+            case_result["execute"] = execute_result["output"]
+
+        if (
+            validate_result["result"] == "passed"
+            and execute_result is not None
+            and execute_result["result"] == "passed"
+            and execute_response is not None
+        ):
+            assertion_message = demo_check_question_assertions(execute_response, case.get("assertions"))
+            case_result["assertionMessage"] = assertion_message
+            if not assertion_message:
+                case_result["status"] = "pass"
+            else:
+                case_result["status"] = "fail"
+                case_result["tuningNotes"].append(assertion_message)
+        else:
+            case_result["status"] = "fail"
+            case_result["tuningNotes"].append("Validate or execute failed; inspect linked evidence.")
+            if validate_response.get("success") is not True:
+                case_result["tuningNotes"].append(demo_response_error_message(validate_response))
+
+        case_results.append(case_result)
+
+    pass_count = sum(1 for item in case_results if item.get("status") == "pass")
+    fail_count = sum(1 for item in case_results if item.get("status") == "fail")
+    clarify_count = sum(1 for item in case_results if item.get("status") == "needs-clarification")
+    unsupported_count = sum(1 for item in case_results if item.get("status") == "unsupported")
+    executable_count = sum(1 for item in case_results if item.get("declaredStatus") == "executable")
+    replay = {
+        "schemaVersion": "foggy-demo-question-bank-replay/v1",
+        "generatedAt": demo_now_iso(),
+        "questionBank": str(question_bank_path),
+        "questionBankSchemaVersion": bank.get("schemaVersion"),
+        "model": bank.get("model"),
+        "queryModelFile": str(query_model_file) if query_model_file else None,
+        "availableFields": available_fields,
+        "totalCases": len(case_results),
+        "executableCases": executable_count,
+        "passCases": pass_count,
+        "failCases": fail_count,
+        "needsClarificationCases": clarify_count,
+        "unsupportedCases": unsupported_count,
+        "cases": case_results,
+    }
+    demo_write_json(output_path, replay)
+    return {
+        "path": str(output_path),
+        "total": len(case_results),
+        "executable": executable_count,
+        "passed": pass_count,
+        "failed": fail_count,
+        "needsClarification": clarify_count,
+        "unsupported": unsupported_count,
+    }
+
+
+def demo_check_question_assertions(response: dict[str, Any], assertions: Any) -> str:
+    if not assertions:
+        return ""
+    if response.get("success") is not True:
+        return "Question execute envelope success is not true."
+    data = response.get("data") if isinstance(response.get("data"), dict) else {}
+    items = data.get("items") if isinstance(data.get("items"), list) else []
+    if assertions.get("rowCountMin") is not None and len(items) < int(assertions["rowCountMin"]):
+        return f"Expected at least {assertions['rowCountMin']} row(s), got {len(items)}."
+
+    schema = data.get("schema") if isinstance(data.get("schema"), dict) else {}
+    columns = schema.get("columns") if isinstance(schema.get("columns"), list) else []
+    schema_columns = [
+        str(column.get("name"))
+        for column in columns
+        if isinstance(column, dict) and column.get("name") is not None
+    ]
+    for column in assertions.get("requiredColumns") or []:
+        if str(column) not in schema_columns:
+            return f"Expected result schema column '{column}' was not returned."
+
+    for expected in assertions.get("expectedValues") or []:
+        if not isinstance(expected, dict):
+            continue
+        field = str(expected.get("field") or "")
+        value = str(expected.get("value") or "")
+        mismatched = [
+            item
+            for item in items
+            if isinstance(item, dict) and str(item.get(field)) != value
+        ]
+        if items and mismatched:
+            return f"Expected all result rows to have {field}={value}."
+    return ""
+
+
+def demo_validate_capabilities_response(response: dict[str, Any], managed_datasource: bool = True) -> str:
+    message = demo_validate_success_response(response)
+    if message:
+        return message
+    data = response.get("data") if isinstance(response.get("data"), dict) else {}
+    if data.get("securityMode") != "none-dev-test-only":
+        return f"securityMode is {data.get('securityMode')}, expected none-dev-test-only."
+    capabilities = data.get("capabilities") if isinstance(data.get("capabilities"), dict) else {}
+    required = [
+        "runtime.capabilities",
+        "datasources.test",
+        "tables.list",
+        "tables.inspect",
+        "sql.query",
+        "models.validate",
+        "bundles.list",
+        "bundles.add",
+        "models.refresh",
+        "models.describe",
+        "query.validate",
+        "query.execute",
+    ]
+    if managed_datasource:
+        required.extend(["datasources.add", "datasources.bind"])
+    for capability in required:
+        if capabilities.get(capability) != "supported":
+            return f"capability {capability} is {capabilities.get(capability)}."
+    return ""
+
+
+def demo_validate_models_validate_response(response: dict[str, Any]) -> str:
+    message = demo_validate_success_response(response)
+    if message:
+        return message
+    data = response.get("data") if isinstance(response.get("data"), dict) else {}
+    if data.get("valid") is not True:
+        return "models.validate data.valid is not true."
+    if int(data.get("invalidFiles") or 0) != 0:
+        return f"models.validate invalidFiles is {data.get('invalidFiles')}."
+    return ""
+
+
+def demo_validate_models_refresh_response(response: dict[str, Any]) -> str:
+    message = demo_validate_success_response(response)
+    if message:
+        return message
+    data = response.get("data") if isinstance(response.get("data"), dict) else {}
+    if int(data.get("failedCount") or 0) != 0:
+        return f"models.refresh failedCount is {data.get('failedCount')}."
+    refreshed = data.get("refreshedModels") if isinstance(data.get("refreshedModels"), list) else []
+    if "SalesDropDailyQueryModel" not in refreshed:
+        return "models.refresh did not refresh SalesDropDailyQueryModel."
+    return ""
+
+
+def demo_validate_success_response(response: dict[str, Any]) -> str:
+    if response.get("success") is True:
+        return ""
+    return demo_response_error_message(response) or "Runtime envelope success is not true."
+
+
+def demo_response_error_message(response: dict[str, Any]) -> str:
+    error = response.get("error") if isinstance(response.get("error"), dict) else {}
+    code = error.get("code")
+    message = error.get("message")
+    if code and message:
+        return f"{code}: {message}"
+    if message:
+        return str(message)
+    if code:
+        return str(code)
+    return ""
+
+
+def demo_find_query_model_file(models_dir: Path) -> Path | None:
+    direct = models_dir / "query" / "SalesDropDailyQueryModel.qm"
+    if direct.exists():
+        return direct
+    matches = sorted(models_dir.rglob("SalesDropDailyQueryModel.qm")) if models_dir.exists() else []
+    return matches[0] if matches else None
+
+
+def demo_available_query_fields(query_model_file: Path | None) -> list[str]:
+    if query_model_file is None:
+        return []
+    text = query_model_file.read_text(encoding="utf-8")
+    return sorted(set(match.group(1) for match in re.finditer(r"salesDrop\.([A-Za-z][A-Za-z0-9_]*)", text)))
+
+
+def demo_read_json_object(path: Path) -> dict[str, Any]:
+    raw = path.read_text(encoding="utf-8-sig").lstrip("\ufeff")
+    payload = json.loads(raw)
+    if not isinstance(payload, dict):
+        raise ValueError(f"{path} must contain a JSON object")
+    return payload
+
+
+def demo_write_json(path: Path, value: Any) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(value, ensure_ascii=False, indent=2, sort_keys=True), encoding="utf-8")
+
+
+def demo_write_replay_report(path: Path, summary: dict[str, Any]) -> None:
+    question = summary.get("questionBankSummary") or {}
+    lines = [
+        "# Foggy sales-drop CLI replay",
+        "",
+        f"- Status: {summary.get('status')}",
+        f"- Failure: {summary.get('failure') or 'none'}",
+        f"- Runtime URL: {summary.get('runtimeUrl')}",
+        f"- Runtime port: {summary.get('runtimePort')}",
+        f"- Namespace: {summary.get('namespace')}",
+        f"- Data source: {summary.get('dataSource')}",
+        f"- Bundle: {summary.get('bundle')}",
+        f"- SQLite: {summary.get('sqlitePath')}",
+        f"- Skill dir: {summary.get('skillDir')}",
+        f"- Evidence dir: {summary.get('evidenceDir')}",
+        f"- Command status: {summary.get('commandStatus')}",
+        f"- Question bank: total={question.get('total')}, executable={question.get('executable')}, "
+        f"pass={question.get('passed')}, fail={question.get('failed')}, "
+        f"needs-clarification={question.get('needsClarification')}",
+        "",
+        "## Commands",
+        "",
+    ]
+    for item in summary.get("results") or []:
+        line = f"- {item.get('name')}: {item.get('result')}"
+        if item.get("validationMessage"):
+            line += f" - {item.get('validationMessage')}"
+        line += f" ({item.get('output')})"
+        lines.append(line)
+    lines.extend(
+        [
+            "",
+            "## Scope",
+            "",
+            "This replay uses a running Runtime API plus an unpacked foggy-ai-analysis-demo Skill directory. "
+            "Production permission, auth, RBAC, audit, and governance remain deferred.",
+            "",
+        ]
+    )
+    path.write_text("\n".join(lines), encoding="utf-8")
+
+
+def demo_safe_name(name: str) -> str:
+    safe = re.sub(r"[^A-Za-z0-9._-]+", "-", name).strip("-")
+    return safe or "step"
+
+
+def demo_now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def demo_runtime_port(base_url: str) -> int | None:
+    match = re.search(r":(\d+)(?:/|$)", base_url)
+    return int(match.group(1)) if match else None
 
 
 def required_capabilities_for(args: argparse.Namespace) -> list[str]:

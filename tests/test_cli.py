@@ -11,6 +11,7 @@ from unittest.mock import patch
 
 from foggy_runtime_cli.main import (
     EXIT_API_ERROR,
+    EXIT_CLI_ERROR,
     EXIT_OK,
     EXIT_TRANSPORT_ERROR,
     EXIT_UNSUPPORTED,
@@ -1012,6 +1013,271 @@ class CliTest(unittest.TestCase):
         self.assertEqual([], FakeClient.calls)
         self.assertFalse(payload["success"])
         self.assertEqual("DEMO_ASSET_MISSING", payload["error"]["code"])
+
+    def test_demo_sales_drop_replay_runs_against_runtime_api(self) -> None:
+        capabilities = {
+            "success": True,
+            "engine": "java",
+            "runtimeApiVersion": "foggy-runtime-api/v1",
+            "data": {
+                "schemaVersion": "2026-06-06",
+                "securityMode": "none-dev-test-only",
+                "capabilities": {
+                    "runtime.capabilities": "supported",
+                    "datasources.add": "supported",
+                    "datasources.test": "supported",
+                    "datasources.bind": "supported",
+                    "tables.list": "supported",
+                    "tables.inspect": "supported",
+                    "sql.query": "supported",
+                    "models.validate": "supported",
+                    "bundles.list": "supported",
+                    "bundles.add": "supported",
+                    "models.refresh": "supported",
+                    "models.describe": "supported",
+                    "query.validate": "supported",
+                    "query.execute": "supported",
+                },
+            },
+        }
+        query_result = {
+            "success": True,
+            "engine": "java",
+            "data": {
+                "items": [{"severity": "CRITICAL", "region": "North China"}],
+                "schema": {"columns": [{"name": "severity"}, {"name": "region"}]},
+            },
+        }
+        FakeClient.responses = [
+            capabilities,
+            capabilities,
+            {"success": True, "engine": "java", "data": {}},
+            {"success": True, "engine": "java", "data": {}},
+            {"success": True, "engine": "java", "data": {}},
+            {"success": True, "engine": "java", "data": {"tables": ["sales_drop_daily"]}},
+            {"success": True, "engine": "java", "data": {"table": "sales_drop_daily"}},
+            {"success": True, "engine": "java", "data": {"items": []}},
+            {"success": True, "engine": "java", "data": {"valid": True, "invalidFiles": 0}},
+            {"success": True, "engine": "java", "data": {"bundles": []}},
+            {"success": True, "engine": "java", "data": {"bundle": {"name": "sales-drop-models"}}},
+            {
+                "success": True,
+                "engine": "java",
+                "data": {"failedCount": 0, "refreshedModels": ["SalesDropDailyQueryModel"]},
+            },
+            {"success": True, "engine": "java", "data": {"model": "SalesDropDailyQueryModel"}},
+            {"success": True, "engine": "java", "data": {"valid": True}},
+            query_result,
+            {"success": True, "engine": "java", "data": {"valid": True}},
+            query_result,
+        ]
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            skill_dir = root / "foggy-ai-analysis-demo"
+            demo_dir = skill_dir / "assets" / "sales-drop-demo"
+            models_dir = demo_dir / "models"
+            (models_dir / "query").mkdir(parents=True)
+            (demo_dir / "queries" / "question-bank").mkdir(parents=True)
+            (demo_dir / "schema.sql").write_text(
+                "drop table if exists sales_drop_daily; create table sales_drop_daily(id integer);",
+                encoding="utf-8",
+            )
+            (demo_dir / "data.sql").write_text("insert into sales_drop_daily values (1);", encoding="utf-8")
+            (models_dir / "query" / "SalesDropDailyQueryModel.qm").write_text(
+                "salesDrop.severity\nsalesDrop.region\n",
+                encoding="utf-8",
+            )
+            (demo_dir / "queries" / "basic.json").write_text(json.dumps({"limit": 1}), encoding="utf-8")
+            (demo_dir / "queries" / "question-bank" / "SD-001.json").write_text(
+                json.dumps({"limit": 1}),
+                encoding="utf-8",
+            )
+            (demo_dir / "question-bank.json").write_text(
+                json.dumps(
+                    {
+                        "schemaVersion": "foggy-demo-question-bank/v1",
+                        "model": "SalesDropDailyQueryModel",
+                        "cases": [
+                            {
+                                "id": "SD-001",
+                                "status": "executable",
+                                "question": "critical rows",
+                                "requiredFields": ["severity", "region"],
+                                "payloadFile": "queries/question-bank/SD-001.json",
+                                "assertions": {
+                                    "rowCountMin": 1,
+                                    "requiredColumns": ["severity", "region"],
+                                    "expectedValues": [{"field": "severity", "value": "CRITICAL"}],
+                                },
+                            },
+                            {
+                                "id": "SD-002",
+                                "status": "needs-clarification",
+                                "question": "forecast",
+                                "requiredFields": [],
+                                "skipReason": "forecast source missing",
+                            },
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            evidence_dir = root / "evidence"
+
+            code, output, error = self.run_cli(
+                [
+                    "--base-url",
+                    "http://runtime:18066",
+                    "demo",
+                    "sales-drop",
+                    "replay",
+                    "--skill-dir",
+                    str(skill_dir),
+                    "--evidence-dir",
+                    str(evidence_dir),
+                    "--ready-timeout-seconds",
+                    "0",
+                    "--ready-interval-seconds",
+                    "0",
+                ]
+            )
+
+            summary = json.loads((evidence_dir / "summary.json").read_text(encoding="utf-8"))
+            question_replay = json.loads((evidence_dir / "question-bank-replay.json").read_text(encoding="utf-8"))
+
+        payload = json.loads(output)
+        self.assertEqual(EXIT_OK, code)
+        self.assertEqual("", error)
+        self.assertTrue(payload["success"])
+        self.assertEqual(("http://runtime:18066", "salesdrop", 30.0), FakeClient.init_args)
+        self.assertEqual("passed", summary["status"])
+        self.assertEqual("salesdrop", summary["namespace"])
+        self.assertEqual(2, summary["questionBankSummary"]["total"])
+        self.assertEqual(1, summary["questionBankSummary"]["passed"])
+        self.assertEqual(1, summary["questionBankSummary"]["needsClarification"])
+        self.assertEqual(2, question_replay["totalCases"])
+        self.assertEqual("GET", FakeClient.calls[0][0])
+        self.assertEqual("/api/v1/capabilities", FakeClient.calls[0][1])
+        self.assertEqual("POST", FakeClient.calls[2][0])
+        self.assertEqual("/api/v1/datasources", FakeClient.calls[2][1])
+        self.assertEqual("sales-drop-sqlite", FakeClient.calls[2][2]["name"])
+
+    def test_demo_sales_drop_replay_can_use_default_datasource(self) -> None:
+        capabilities = {
+            "success": True,
+            "engine": "java",
+            "runtimeApiVersion": "foggy-runtime-api/v1",
+            "data": {
+                "schemaVersion": "2026-06-06",
+                "securityMode": "none-dev-test-only",
+                "capabilities": {
+                    "runtime.capabilities": "supported",
+                    "datasources.test": "supported",
+                    "tables.list": "supported",
+                    "tables.inspect": "supported",
+                    "sql.query": "supported",
+                    "models.validate": "supported",
+                    "bundles.list": "supported",
+                    "bundles.add": "supported",
+                    "models.refresh": "supported",
+                    "models.describe": "supported",
+                    "query.validate": "supported",
+                    "query.execute": "supported",
+                },
+            },
+        }
+        FakeClient.responses = [
+            capabilities,
+            capabilities,
+            {"success": True, "engine": "java", "data": {}},
+            {"success": True, "engine": "java", "data": {"tables": ["sales_drop_daily"]}},
+            {"success": True, "engine": "java", "data": {"table": "sales_drop_daily"}},
+            {"success": True, "engine": "java", "data": {"items": []}},
+            {"success": True, "engine": "java", "data": {"valid": True, "invalidFiles": 0}},
+            {"success": True, "engine": "java", "data": {"bundles": []}},
+            {"success": True, "engine": "java", "data": {"bundle": {"name": "sales-drop-models"}}},
+            {
+                "success": True,
+                "engine": "java",
+                "data": {"failedCount": 0, "refreshedModels": ["SalesDropDailyQueryModel"]},
+            },
+            {"success": True, "engine": "java", "data": {"model": "SalesDropDailyQueryModel"}},
+            {"success": True, "engine": "java", "data": {"valid": True}},
+            {"success": True, "engine": "java", "data": {"items": []}},
+        ]
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            skill_dir = root / "foggy-ai-analysis-demo"
+            demo_dir = skill_dir / "assets" / "sales-drop-demo"
+            models_dir = demo_dir / "models"
+            models_dir.mkdir(parents=True)
+            (demo_dir / "queries").mkdir(parents=True)
+            (demo_dir / "schema.sql").write_text(
+                "drop table if exists sales_drop_daily; create table sales_drop_daily(id integer);",
+                encoding="utf-8",
+            )
+            (demo_dir / "data.sql").write_text("insert into sales_drop_daily values (1);", encoding="utf-8")
+            (demo_dir / "queries" / "basic.json").write_text(json.dumps({"limit": 1}), encoding="utf-8")
+            evidence_dir = root / "evidence"
+            sqlite_path = root / "runtime-default.sqlite"
+
+            code, output, error = self.run_cli(
+                [
+                    "--base-url",
+                    "http://runtime:18066",
+                    "demo",
+                    "sales-drop",
+                    "replay",
+                    "--skill-dir",
+                    str(skill_dir),
+                    "--evidence-dir",
+                    str(evidence_dir),
+                    "--sqlite-path",
+                    str(sqlite_path),
+                    "--use-default-datasource",
+                    "--skip-question-bank",
+                    "--ready-timeout-seconds",
+                    "0",
+                    "--ready-interval-seconds",
+                    "0",
+                ]
+            )
+
+            summary = json.loads((evidence_dir / "summary.json").read_text(encoding="utf-8"))
+
+        payload = json.loads(output)
+        self.assertEqual(EXIT_OK, code)
+        self.assertEqual("", error)
+        self.assertTrue(payload["success"])
+        self.assertEqual("default", summary["dataSource"])
+        self.assertEqual("default", summary["dataSourceMode"])
+        self.assertFalse(any(method == "POST" and path == "/api/v1/datasources" for method, path, _ in FakeClient.calls))
+        self.assertFalse(any(method == "PUT" and path.endswith("/datasource") for method, path, _ in FakeClient.calls))
+        self.assertEqual(("POST", "/api/v1/datasources/default/test", None), FakeClient.calls[2])
+        self.assertEqual("default", FakeClient.calls[3][2]["dataSource"])
+
+    def test_demo_sales_drop_replay_default_datasource_requires_sqlite_path(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            skill_dir = Path(temp_dir) / "foggy-ai-analysis-demo"
+            code, output, error = self.run_cli(
+                [
+                    "--base-url",
+                    "http://runtime:18066",
+                    "demo",
+                    "sales-drop",
+                    "replay",
+                    "--skill-dir",
+                    str(skill_dir),
+                    "--use-default-datasource",
+                ]
+            )
+
+        payload = json.loads(output)
+        self.assertEqual(EXIT_CLI_ERROR, code)
+        self.assertEqual("", error)
+        self.assertFalse(payload["success"])
+        self.assertEqual("DEMO_SQLITE_PATH_REQUIRED", payload["error"]["code"])
+        self.assertEqual([], FakeClient.calls)
 
     def test_compose_validate_reads_script_file_and_checks_capability(self) -> None:
         FakeClient.responses = [
