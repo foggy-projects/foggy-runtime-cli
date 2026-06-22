@@ -9,15 +9,27 @@ The CLI talks only to `/api/v1/*` runtime endpoints. It does not call Java or Py
 Windows PowerShell from GitHub Release:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\install-foggy-runtime-cli.ps1 -Version 0.1.3
+$version = "0.1.3"
+$download = Join-Path $env:TEMP "foggy-runtime-cli-install-$version"
+New-Item -ItemType Directory -Force -Path $download | Out-Null
+Invoke-WebRequest `
+  -Uri "https://github.com/foggy-projects/foggy-runtime-cli/releases/download/v$version/install-foggy-runtime-cli.ps1" `
+  -OutFile (Join-Path $download "install-foggy-runtime-cli.ps1")
+powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $download "install-foggy-runtime-cli.ps1") -Version $version
 foggy-runtime --help
+python -m pip show foggy-runtime-cli
 ```
 
 Linux/macOS from GitHub Release:
 
 ```bash
-bash install-foggy-runtime-cli.sh --version 0.1.3
+version="0.1.3"
+download="${TMPDIR:-/tmp}/foggy-runtime-cli-install-$version"
+mkdir -p "$download"
+curl -fsSL "https://github.com/foggy-projects/foggy-runtime-cli/releases/download/v$version/install-foggy-runtime-cli.sh" -o "$download/install-foggy-runtime-cli.sh"
+bash "$download/install-foggy-runtime-cli.sh" --version "$version"
 foggy-runtime --help
+python -m pip show foggy-runtime-cli
 ```
 
 From a released wheel:
@@ -26,6 +38,8 @@ From a released wheel:
 python -m pip install foggy_runtime_cli-0.1.3-py3-none-any.whl
 foggy-runtime --help
 ```
+
+The release installers download the wheel and `SHA256SUMS`, verify the wheel hash, install with pip, and print a short CLI help excerpt. Use `--python <python-exe>` or `-Python <python-exe>` when the target Python is not the default `python` on `PATH`.
 
 From source:
 
@@ -68,6 +82,12 @@ Release assets include:
 - `install-foggy-runtime-cli.ps1`
 - `install-foggy-runtime-cli.sh`
 
+For `v0.1.2` and later, the public CLI release can also carry companion `foggy-ai-analysis-demo` Skill assets uploaded from the workspace packaging script:
+
+- `foggy-ai-analysis-demo-skill-<version>.zip`
+- `foggy-ai-analysis-demo-skill-<version>-manifest.json`
+- `foggy-ai-analysis-demo-skill-<version>-SHA256SUMS`
+
 ## Examples
 
 ```powershell
@@ -92,6 +112,7 @@ foggy-runtime fsscript run --script workflow.fsscript
 foggy-runtime fsscript run --script workflow.fsscript --enable-cte-bridge
 foggy-runtime tables inspect --table sale_order --schema public --include-indexes
 foggy-runtime demo sales-drop plan --repo-root D:\foggy-projects\foggy-data-mcp --port 18066
+foggy-runtime demo sales-drop plan --repo-root D:\foggy-projects\foggy-data-mcp --skill-dir D:\demo\skills\foggy-ai-analysis-demo --port 18066
 ```
 
 JSON output is the default and preserves the Runtime API envelope for Skill consumption.
@@ -156,3 +177,15 @@ The preflight checks Java/Python availability, source-layout CLI import, bundled
 - `query execute`.
 
 If the launcher JAR is missing, the command still returns a plan with a warning so a clean workspace can tell the user to build `foggy-mcp-launcher` or pass `--launcher-jar`.
+
+Use `--skill-dir` when the Skill was downloaded from a release zip and unpacked outside the workspace `.codex\skills` directory. The plan output includes both `skillDir` and `demoDir` so automation can verify which asset copy is being used.
+
+## Feedback
+
+File CLI install, packaging, command behavior, exit code, or Runtime API client issues at:
+
+```text
+https://github.com/foggy-projects/foggy-runtime-cli/issues/new/choose
+```
+
+For demo replay failures, include the release versions, runtime URL, namespace, command status CSV, `summary.json`, and any sanitized CLI stdout/stderr logs.

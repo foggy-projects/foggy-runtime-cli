@@ -961,7 +961,46 @@ class CliTest(unittest.TestCase):
         self.assertEqual("sales-drop", payload["data"]["demo"])
         self.assertEqual("http://127.0.0.1:18066", payload["data"]["baseUrl"])
         self.assertEqual("default", payload["data"]["namespace"])
+        self.assertEqual(str(demo_dir.parent.parent), payload["data"]["skillDir"])
+        self.assertEqual(str(demo_dir), payload["data"]["demoDir"])
         self.assertIn("commands", payload["data"])
+
+    def test_demo_sales_drop_plan_accepts_unpacked_skill_dir(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            repo_root = root / "workspace"
+            skill_dir = root / "release-skill" / "foggy-ai-analysis-demo"
+            demo_dir = skill_dir / "assets" / "sales-drop-demo"
+            (demo_dir / "models").mkdir(parents=True)
+            (demo_dir / "queries").mkdir()
+            (demo_dir / "schema.sql").write_text("create table sales_drop_daily(id integer);", encoding="utf-8")
+            (demo_dir / "data.sql").write_text("insert into sales_drop_daily values (1);", encoding="utf-8")
+            (demo_dir / "queries" / "basic.json").write_text(json.dumps({"limit": 1}), encoding="utf-8")
+
+            code, output, error = self.run_cli(
+                [
+                    "demo",
+                    "sales-drop",
+                    "plan",
+                    "--repo-root",
+                    str(repo_root),
+                    "--skill-dir",
+                    str(skill_dir),
+                    "--port",
+                    "18067",
+                ]
+            )
+
+        payload = json.loads(output)
+        self.assertEqual(EXIT_OK, code)
+        self.assertEqual("", error)
+        self.assertEqual([], FakeClient.calls)
+        self.assertTrue(payload["success"])
+        self.assertEqual(str(skill_dir), payload["data"]["skillDir"])
+        self.assertEqual(str(demo_dir), payload["data"]["demoDir"])
+        self.assertEqual(str(demo_dir / "models"), payload["data"]["modelsDir"])
+        self.assertEqual(str(demo_dir / "queries" / "basic.json"), payload["data"]["queryPayload"])
+        self.assertIn(str(demo_dir / "schema.sql"), payload["data"]["commands"][1]["argv"][2])
 
     def test_demo_sales_drop_plan_reports_missing_assets(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
