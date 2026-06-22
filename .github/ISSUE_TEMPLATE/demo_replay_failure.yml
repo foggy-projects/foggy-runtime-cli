@@ -13,14 +13,14 @@ body:
     id: cli-version
     attributes:
       label: CLI release
-      placeholder: v0.1.4
+      placeholder: v0.1.5
     validations:
       required: true
   - type: input
     id: skill-version
     attributes:
       label: Skill release
-      placeholder: foggy-ai-analysis-demo-skill-0.1.4 from v0.1.4 public CLI release
+      placeholder: foggy-ai-analysis-demo-skill-0.1.5 from v0.1.5 public CLI release
     validations:
       required: true
   - type: input
@@ -34,7 +34,7 @@ body:
     id: launcher-version
     attributes:
       label: Java launcher release
-      placeholder: runtime-api-launcher-v0.1.0
+      placeholder: runtime-api-launcher-v0.1.1
     validations:
       required: true
   - type: input
@@ -71,7 +71,7 @@ body:
     attributes:
       label: Launcher source
       description: Local jar path, Docker image, or other runtime source.
-      placeholder: runtime-api-launcher-v0.1.0 / foggy-mcp-launcher-9.1.0.beta-runtime-api.jar
+      placeholder: runtime-api-launcher-v0.1.1 / foggy-mcp-launcher-9.1.0.beta-runtime-api.jar
     validations:
       required: true
   - type: input

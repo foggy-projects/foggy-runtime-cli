@@ -8,8 +8,8 @@ The CLI talks only to `/api/v1/*` runtime endpoints. It does not call Java or Py
 
 Current validated public onboarding baseline:
 
-- CLI and `foggy-ai-analysis-demo` Skill: `v0.1.4`
-- Java Runtime API launcher: `runtime-api-launcher-v0.1.0`
+- CLI and `foggy-ai-analysis-demo` Skill: `v0.1.5`
+- Java Runtime API launcher: `runtime-api-launcher-v0.1.1`
 - Runtime URL: `http://127.0.0.1:18066`
 - Namespace: `salesdrop`
 - Datasource mode: Java runtime default SQLite datasource
@@ -19,8 +19,8 @@ Prerequisites: Python with pip, Java on `PATH`, and PowerShell.
 Copy this PowerShell path to install the CLI, download the Skill and Java launcher, start the local runtime, and replay the sales-drop demo:
 
 ```powershell
-$version = "0.1.4"
-$launcherTag = "runtime-api-launcher-v0.1.0"
+$version = "0.1.5"
+$launcherTag = "runtime-api-launcher-v0.1.1"
 $demoRoot = Join-Path $env:TEMP "foggy-ai-analysis-demo-$version"
 $installDir = Join-Path $demoRoot "cli-install"
 $skillDownload = Join-Path $demoRoot "skill-download"
@@ -92,7 +92,7 @@ Current boundary: `--use-default-datasource` is required for the public sales-dr
 Copyable first prompt for an LLM session:
 
 ```text
-Use foggy-runtime-cli v0.1.4, the foggy-ai-analysis-demo Skill v0.1.4 assets from the public CLI release, and Java launcher runtime-api-launcher-v0.1.0. Start the Java runtime on http://127.0.0.1:18066 with a SQLite default datasource, then run foggy-runtime demo sales-drop replay with --use-default-datasource and the same SQLite path. Record commands, checksums, runtime URL, namespace salesdrop, question-bank totals, evidence files, failures, and fixes. Do not require namespace-bound datasource execution; production permission/auth/RBAC/audit/governance are out of scope for this demo.
+Use foggy-runtime-cli v0.1.5, the foggy-ai-analysis-demo Skill v0.1.5 assets from the public CLI release, and Java launcher runtime-api-launcher-v0.1.1. Start the Java runtime on http://127.0.0.1:18066 with a SQLite default datasource, then run foggy-runtime demo sales-drop replay with --use-default-datasource and the same SQLite path. Record commands, checksums, runtime URL, namespace salesdrop, question-bank totals, evidence files, failures, and fixes. Do not require namespace-bound datasource execution; production permission/auth/RBAC/audit/governance are out of scope for this demo.
 ```
 
 ## Installation
@@ -100,7 +100,7 @@ Use foggy-runtime-cli v0.1.4, the foggy-ai-analysis-demo Skill v0.1.4 assets fro
 Windows PowerShell from GitHub Release:
 
 ```powershell
-$version = "0.1.4"
+$version = "0.1.5"
 $download = Join-Path $env:TEMP "foggy-runtime-cli-install-$version"
 New-Item -ItemType Directory -Force -Path $download | Out-Null
 Invoke-WebRequest `
@@ -114,7 +114,7 @@ python -m pip show foggy-runtime-cli
 Linux/macOS from GitHub Release:
 
 ```bash
-version="0.1.4"
+version="0.1.5"
 download="${TMPDIR:-/tmp}/foggy-runtime-cli-install-$version"
 mkdir -p "$download"
 curl -fsSL "https://github.com/foggy-projects/foggy-runtime-cli/releases/download/v$version/install-foggy-runtime-cli.sh" -o "$download/install-foggy-runtime-cli.sh"
@@ -126,7 +126,7 @@ python -m pip show foggy-runtime-cli
 From a released wheel:
 
 ```powershell
-python -m pip install foggy_runtime_cli-0.1.4-py3-none-any.whl
+python -m pip install foggy_runtime_cli-0.1.5-py3-none-any.whl
 foggy-runtime --help
 ```
 
@@ -160,8 +160,8 @@ The release build runs tests by default, builds wheel and sdist artifacts into `
 GitHub releases are created from tags by `.github/workflows/release.yml`:
 
 ```powershell
-git tag -a v0.1.4 -m "Release v0.1.4"
-git push origin v0.1.4
+git tag -a v0.1.5 -m "Release v0.1.5"
+git push origin v0.1.5
 ```
 
 Release assets include:

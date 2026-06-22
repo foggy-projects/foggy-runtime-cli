@@ -52,7 +52,7 @@ jobs:
 
           1. Install this CLI release.
           2. Download the foggy-ai-analysis-demo Skill companion assets from this release when present.
-          3. Download the Java Runtime API launcher from https://github.com/foggy-projects/foggy-data-mcp-bridge/releases.
+          3. Download Java Runtime API launcher runtime-api-launcher-v0.1.1 from https://github.com/foggy-projects/foggy-data-mcp-bridge/releases/tag/runtime-api-launcher-v0.1.1.
 
           The sales-drop public demo should run with the Java runtime default SQLite datasource and:
 
