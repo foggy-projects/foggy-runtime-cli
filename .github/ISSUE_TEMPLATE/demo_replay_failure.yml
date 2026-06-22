@@ -31,10 +31,39 @@ body:
     validations:
       required: true
   - type: input
+    id: launcher-version
+    attributes:
+      label: Java launcher release
+      placeholder: runtime-api-launcher-v0.1.0
+    validations:
+      required: true
+  - type: input
     id: namespace
     attributes:
       label: Namespace
       placeholder: salesdrop
+    validations:
+      required: true
+  - type: input
+    id: datasource-mode
+    attributes:
+      label: Datasource mode
+      placeholder: runtime default SQLite datasource / Runtime API-managed named datasource
+    validations:
+      required: true
+  - type: input
+    id: sqlite-path
+    attributes:
+      label: SQLite path or datasource type
+      description: Remove secrets and do not paste production credentials.
+      placeholder: C:\...\runtime\foggy_mcp_lite.db
+    validations:
+      required: true
+  - type: input
+    id: security-mode
+    attributes:
+      label: Runtime securityMode
+      placeholder: none-dev-test-only
     validations:
       required: true
   - type: input
@@ -45,6 +74,14 @@ body:
       placeholder: runtime-api-launcher-v0.1.0 / foggy-mcp-launcher-9.1.0.beta-runtime-api.jar
     validations:
       required: true
+  - type: input
+    id: legacy-datasource-dir
+    attributes:
+      label: Launcher legacyDatasourceConfigDir
+      description: Include when the launcher output has this field. Use "not present" for older launchers.
+      placeholder: C:\...\runtime\legacy-datasources / not present
+    validations:
+      required: false
   - type: textarea
     id: command
     attributes:
@@ -64,10 +101,18 @@ body:
     id: evidence
     attributes:
       label: Evidence files or excerpts
-      description: Include summary.json, question-bank-replay.json, command-status.csv, runtime-log classification, and sanitized stdout/stderr snippets when available.
+      description: Include summary.json, question-bank-replay.json, command-status.json, runtime.out.log, runtime.err.log, runtime-log classification, and sanitized stdout/stderr snippets when available.
       render: text
     validations:
       required: true
+  - type: textarea
+    id: mcp-ide
+    attributes:
+      label: MCP IDE details, if relevant
+      description: Include endpoint, transport, headers support, initialize result, and tools/list result. The current verified endpoint is /mcp/analyst/rpc with X-NS.
+      render: text
+    validations:
+      required: false
   - type: textarea
     id: boundary
     attributes:
