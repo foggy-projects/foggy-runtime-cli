@@ -26,9 +26,11 @@ class FakeClient:
     responses: list[dict[str, Any] | Exception] | None = None
     raise_error: Exception | None = None
     init_args: tuple[str, str | None, float] | None = None
+    auth_code: str | None = None
 
-    def __init__(self, base_url: str, namespace: str | None, timeout: float) -> None:
+    def __init__(self, base_url: str, namespace: str | None, timeout: float, auth_code: str | None = None) -> None:
         type(self).init_args = (base_url, namespace, timeout)
+        type(self).auth_code = auth_code
 
     def request(self, method: str, path: str, body: dict[str, Any] | None) -> dict[str, Any]:
         if type(self).raise_error is not None:
@@ -49,6 +51,7 @@ class CliTest(unittest.TestCase):
         FakeClient.responses = None
         FakeClient.raise_error = None
         FakeClient.init_args = None
+        FakeClient.auth_code = None
 
     def run_cli(self, argv: list[str], stdin: str = "") -> tuple[int, str, str]:
         stdout = io.StringIO()
@@ -142,6 +145,26 @@ class CliTest(unittest.TestCase):
 
         self.assertEqual(EXIT_OK, code)
         self.assertEqual(("http://generic-runtime", None, 30.0), FakeClient.init_args)
+
+    def test_auth_code_option_is_passed_to_client(self) -> None:
+        code, _output, _error = self.run_cli(["--auth-code", "runtime-secret", "capabilities"])
+
+        self.assertEqual(EXIT_OK, code)
+        self.assertEqual("runtime-secret", FakeClient.auth_code)
+
+    def test_auth_code_env_is_passed_to_client(self) -> None:
+        with patch.dict(os.environ, {"FOGGY_RUNTIME_API_AUTH_CODE": "env-secret"}, clear=True):
+            code, _output, _error = self.run_cli(["capabilities"])
+
+        self.assertEqual(EXIT_OK, code)
+        self.assertEqual("env-secret", FakeClient.auth_code)
+
+    def test_auth_code_option_overrides_env(self) -> None:
+        with patch.dict(os.environ, {"FOGGY_RUNTIME_API_AUTH_CODE": "env-secret"}, clear=True):
+            code, _output, _error = self.run_cli(["--auth-code", "runtime-secret", "capabilities"])
+
+        self.assertEqual(EXIT_OK, code)
+        self.assertEqual("runtime-secret", FakeClient.auth_code)
 
     def test_engine_option_is_not_supported(self) -> None:
         with patch.dict(os.environ, {}, clear=True):

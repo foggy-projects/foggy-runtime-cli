@@ -22,6 +22,7 @@ class CapturingHandler(BaseHTTPRequestHandler):
             "method": "GET",
             "path": self.path,
             "x_ns": self.headers.get("X-NS"),
+            "runtime_code": self.headers.get("X-Foggy-Runtime-Code"),
             "body": None,
         }
         self._write_response()
@@ -33,6 +34,7 @@ class CapturingHandler(BaseHTTPRequestHandler):
             "method": "POST",
             "path": self.path,
             "x_ns": self.headers.get("X-NS"),
+            "runtime_code": self.headers.get("X-Foggy-Runtime-Code"),
             "content_type": self.headers.get("Content-Type"),
             "body": json.loads(raw_body) if raw_body else None,
         }
@@ -79,10 +81,19 @@ class RuntimeApiClientHttpTest(unittest.TestCase):
                 "method": "GET",
                 "path": "/api/v1/capabilities",
                 "x_ns": "dev",
+                "runtime_code": None,
                 "body": None,
             },
             CapturingHandler.captured,
         )
+
+    def test_request_sends_runtime_auth_code_header(self) -> None:
+        client = RuntimeApiClient(self.base_url, auth_code="runtime-secret", timeout=5)
+
+        response = client.request("GET", "/api/v1/capabilities")
+
+        self.assertTrue(response["success"])
+        self.assertEqual("runtime-secret", CapturingHandler.captured["runtime_code"])
 
     def test_post_request_sends_json_body(self) -> None:
         client = RuntimeApiClient(self.base_url, namespace="dev", timeout=5)

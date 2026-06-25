@@ -31,7 +31,7 @@ def main(
     stdout: TextIO | None = None,
     stderr: TextIO | None = None,
     stdin: TextIO | None = None,
-    client_factory: Callable[[str, str | None, float], Any] = RuntimeApiClient,
+    client_factory: Callable[..., Any] = RuntimeApiClient,
 ) -> int:
     stdout = stdout or sys.stdout
     stderr = stderr or sys.stderr
@@ -51,7 +51,7 @@ def main(
     runtime_handler = getattr(args, "runtime_handler", None)
     if runtime_handler is not None:
         base_url = resolve_base_url(args)
-        client = client_factory(base_url, args.namespace, args.timeout)
+        client = client_factory(base_url, args.namespace, args.timeout, resolve_auth_code(args))
         response, exit_code = runtime_handler(args, client, base_url)
         render_response(response, args.output, stdout)
         return exit_code
@@ -61,7 +61,7 @@ def main(
         return EXIT_CLI_ERROR
 
     base_url = resolve_base_url(args)
-    client = client_factory(base_url, args.namespace, args.timeout)
+    client = client_factory(base_url, args.namespace, args.timeout, resolve_auth_code(args))
     required_capabilities = required_capabilities_for(args)
     if required_capabilities:
         try:
@@ -102,6 +102,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--namespace", default=os.environ.get("FOGGY_NAMESPACE"), help="Namespace sent as X-NS.")
     parser.add_argument("--output", choices=["json", "pretty"], default="json", help="Output format.")
     parser.add_argument("--timeout", type=float, default=30.0, help="HTTP timeout seconds.")
+    parser.add_argument(
+        "--auth-code",
+        default=None,
+        help="Runtime API auth code. Overrides FOGGY_RUNTIME_API_AUTH_CODE and is sent as X-Foggy-Runtime-Code.",
+    )
 
     subparsers = parser.add_subparsers(dest="command", required=True)
 
@@ -464,6 +469,13 @@ def resolve_base_url(args: argparse.Namespace) -> str:
     if generic:
         return generic
     return DEFAULT_BASE_URL
+
+
+def resolve_auth_code(args: argparse.Namespace) -> str | None:
+    if args.auth_code is not None:
+        return args.auth_code
+    env_auth_code = os.environ.get("FOGGY_RUNTIME_API_AUTH_CODE")
+    return env_auth_code if env_auth_code else None
 
 
 def wait_ready_handler(

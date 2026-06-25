@@ -48,6 +48,8 @@ jobs:
 
           Assets include the wheel, sdist, install scripts, SHA256SUMS, and release-manifest.json.
 
+          Runtime APIs using securityMode=auth-code require the shared runtime code for protected management operations. Pass it with global --auth-code or FOGGY_RUNTIME_API_AUTH_CODE; the CLI sends X-Foggy-Runtime-Code.
+
           Public Foggy AI analysis demo onboarding uses three release inputs:
 
           1. Install this CLI release.

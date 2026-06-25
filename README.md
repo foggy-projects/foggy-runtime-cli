@@ -89,6 +89,8 @@ question-bank total=12 executable=11 pass=11 fail=0 needs-clarification=1
 
 Current boundary: `--use-default-datasource` is required for the public sales-drop end-to-end path. Runtime API-managed named datasources are useful for table discovery and read-only SQL probing, but current Java model validation, refresh, describe, and query execution use the runtime default datasource. The launcher is dev/test-only and reports `securityMode=none-dev-test-only`; production permission, auth, RBAC, audit, and governance are deferred.
 
+For Runtime API management operations against runtimes configured with `securityMode=auth-code`, use CLI `v0.1.6` or later and pass `--auth-code` or `FOGGY_RUNTIME_API_AUTH_CODE`. This auth-code path is separate from the current public sales-drop demo baseline above.
+
 Copyable first prompt for an LLM session:
 
 ```text
@@ -100,7 +102,7 @@ Use foggy-runtime-cli v0.1.5, the foggy-ai-analysis-demo Skill v0.1.5 assets fro
 Windows PowerShell from GitHub Release:
 
 ```powershell
-$version = "0.1.5"
+$version = "0.1.6"
 $download = Join-Path $env:TEMP "foggy-runtime-cli-install-$version"
 New-Item -ItemType Directory -Force -Path $download | Out-Null
 Invoke-WebRequest `
@@ -114,7 +116,7 @@ python -m pip show foggy-runtime-cli
 Linux/macOS from GitHub Release:
 
 ```bash
-version="0.1.5"
+version="0.1.6"
 download="${TMPDIR:-/tmp}/foggy-runtime-cli-install-$version"
 mkdir -p "$download"
 curl -fsSL "https://github.com/foggy-projects/foggy-runtime-cli/releases/download/v$version/install-foggy-runtime-cli.sh" -o "$download/install-foggy-runtime-cli.sh"
@@ -126,7 +128,7 @@ python -m pip show foggy-runtime-cli
 From a released wheel:
 
 ```powershell
-python -m pip install foggy_runtime_cli-0.1.5-py3-none-any.whl
+python -m pip install foggy_runtime_cli-0.1.6-py3-none-any.whl
 foggy-runtime --help
 ```
 
@@ -160,8 +162,8 @@ The release build runs tests by default, builds wheel and sdist artifacts into `
 GitHub releases are created from tags by `.github/workflows/release.yml`:
 
 ```powershell
-git tag -a v0.1.5 -m "Release v0.1.5"
-git push origin v0.1.5
+git tag -a v0.1.6 -m "Release v0.1.6"
+git push origin v0.1.6
 ```
 
 Release assets include:
@@ -184,6 +186,7 @@ For `v0.1.2` and later, the public CLI release can also carry companion `foggy-a
 ```powershell
 foggy-runtime --base-url http://127.0.0.1:8080 capabilities
 foggy-runtime --base-url http://127.0.0.1:8080 wait-ready --timeout-seconds 90 --interval-seconds 2
+foggy-runtime --auth-code $env:FOGGY_RUNTIME_API_AUTH_CODE bundles add --name sales-drop-dev --path ./models --namespace default --watch
 foggy-runtime bundles list
 foggy-runtime bundles add --name sales-drop-dev --path ./models --namespace default --watch --validate --refresh
 foggy-runtime bundles update sales-drop-dev --path ./models --watch
@@ -210,6 +213,8 @@ foggy-runtime --base-url http://127.0.0.1:18066 demo sales-drop replay --skill-d
 JSON output is the default and preserves the Runtime API envelope for Skill consumption.
 
 The CLI is backend-neutral and does not select Java or Python. `--base-url` always wins, followed by `FOGGY_RUNTIME_API_URL`, then the local development default `http://127.0.0.1:8080`.
+
+When the connected Runtime API reports `securityMode=auth-code`, pass the shared runtime code with global `--auth-code <code>` or `FOGGY_RUNTIME_API_AUTH_CODE`. The CLI sends it as `X-Foggy-Runtime-Code`, which is required for protected management operations such as bundle add/update/remove, datasource add/test/bind, resources save, models validate, and models refresh. Runtimes using `none-dev-test-only` do not require this option.
 
 Use `wait-ready` after starting a local dev/test runtime. It polls `GET /api/v1/capabilities` until the Runtime API is reachable and returns success; transient transport failures are retained in JSON `data.attempts`.
 

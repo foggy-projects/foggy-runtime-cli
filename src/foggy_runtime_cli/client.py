@@ -17,6 +17,7 @@ class RuntimeApiClient:
     base_url: str
     namespace: str | None = None
     timeout: float = 30.0
+    auth_code: str | None = None
 
     def request(self, method: str, path: str, body: dict[str, Any] | None = None) -> dict[str, Any]:
         url = urljoin(self._normalized_base_url(), path.lstrip("/"))
@@ -28,6 +29,8 @@ class RuntimeApiClient:
             headers["Content-Type"] = "application/json"
         if self.namespace:
             headers["X-NS"] = self.namespace
+        if self.auth_code:
+            headers["X-Foggy-Runtime-Code"] = self.auth_code
 
         request = Request(url, data=data, headers=headers, method=method)
         try:
@@ -63,4 +66,3 @@ class RuntimeApiClient:
 
 def path_quote(value: str) -> str:
     return quote(value, safe="")
-
