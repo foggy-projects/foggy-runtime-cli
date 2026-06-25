@@ -4,12 +4,105 @@ Standalone CLI for `Foggy Runtime API v1`.
 
 The CLI talks only to `/api/v1/*` runtime endpoints. It does not call Java or Python engine private routes.
 
+## Public AI Analysis Demo Quick Start
+
+Current validated public onboarding baseline:
+
+- CLI and `foggy-ai-analysis-demo` Skill: `v0.1.5`
+- Java Runtime API launcher: `runtime-api-launcher-v0.1.1`
+- Runtime URL: `http://127.0.0.1:18066`
+- Namespace: `salesdrop`
+- Datasource mode: Java runtime default SQLite datasource
+
+Prerequisites: Python with pip, Java on `PATH`, and PowerShell.
+
+Copy this PowerShell path to install the CLI, download the Skill and Java launcher, start the local runtime, and replay the sales-drop demo:
+
+```powershell
+$version = "0.1.5"
+$launcherTag = "runtime-api-launcher-v0.1.1"
+$demoRoot = Join-Path $env:TEMP "foggy-ai-analysis-demo-$version"
+$installDir = Join-Path $demoRoot "cli-install"
+$skillDownload = Join-Path $demoRoot "skill-download"
+$skillUnzip = Join-Path $demoRoot "skill"
+$launcherDir = Join-Path $demoRoot "launcher"
+$runtimeDir = Join-Path $demoRoot "runtime"
+$evidenceDir = Join-Path $demoRoot "evidence"
+
+foreach ($dir in @($installDir, $skillDownload, $skillUnzip, $launcherDir, $runtimeDir, $evidenceDir)) {
+  New-Item -ItemType Directory -Force -Path $dir | Out-Null
+}
+
+# 1. Install foggy-runtime-cli from the public release.
+Invoke-WebRequest `
+  -Uri "https://github.com/foggy-projects/foggy-runtime-cli/releases/download/v$version/install-foggy-runtime-cli.ps1" `
+  -OutFile (Join-Path $installDir "install-foggy-runtime-cli.ps1")
+powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $installDir "install-foggy-runtime-cli.ps1") -Version $version
+
+# 2. Download and unpack the foggy-ai-analysis-demo Skill companion assets.
+$cliReleaseBase = "https://github.com/foggy-projects/foggy-runtime-cli/releases/download/v$version"
+$skillZip = "foggy-ai-analysis-demo-skill-${version}.zip"
+$skillManifest = "foggy-ai-analysis-demo-skill-${version}-manifest.json"
+$skillChecksums = "foggy-ai-analysis-demo-skill-${version}-SHA256SUMS"
+foreach ($asset in @($skillZip, $skillManifest, $skillChecksums)) {
+  Invoke-WebRequest -Uri "$cliReleaseBase/$asset" -OutFile (Join-Path $skillDownload $asset)
+}
+Expand-Archive -Path (Join-Path $skillDownload $skillZip) -DestinationPath $skillUnzip -Force
+$skillDir = Join-Path $skillUnzip "foggy-ai-analysis-demo"
+
+# 3. Download the Java Runtime API launcher.
+$launcherBase = "https://github.com/foggy-projects/foggy-data-mcp-bridge/releases/download/$launcherTag"
+foreach ($asset in @(
+  "foggy-mcp-launcher-9.1.0.beta-runtime-api.jar",
+  "start-foggy-runtime.ps1",
+  "start-foggy-runtime.sh",
+  "README-runtime-api-launcher.md",
+  "runtime-launcher-manifest.json",
+  "SHA256SUMS"
+)) {
+  Invoke-WebRequest -Uri "$launcherBase/$asset" -OutFile (Join-Path $launcherDir $asset)
+}
+
+# 4. Start Java with a known SQLite default datasource.
+Push-Location $launcherDir
+$start = .\start-foggy-runtime.ps1 -Port 18066 -WorkDir $runtimeDir | ConvertFrom-Json
+Pop-Location
+$sqlite = $start.sqlitePath
+
+# 5. Verify readiness and replay the sales-drop question bank.
+foggy-runtime --base-url $start.runtimeUrl --namespace salesdrop wait-ready --timeout-seconds 90 --interval-seconds 2
+foggy-runtime --base-url $start.runtimeUrl demo sales-drop replay `
+  --skill-dir $skillDir `
+  --evidence-dir $evidenceDir `
+  --sqlite-path $sqlite `
+  --use-default-datasource
+
+# 6. Stop the local dev/test runtime when finished.
+Stop-Process -Id $start.pid -ErrorAction SilentlyContinue
+```
+
+Expected replay result:
+
+```text
+question-bank total=12 executable=11 pass=11 fail=0 needs-clarification=1
+```
+
+Current boundary: `--use-default-datasource` is required for the public sales-drop end-to-end path. Runtime API-managed named datasources are useful for table discovery and read-only SQL probing, but current Java model validation, refresh, describe, and query execution use the runtime default datasource. The launcher is dev/test-only and reports `securityMode=none-dev-test-only`; production permission, auth, RBAC, audit, and governance are deferred.
+
+For Runtime API management operations against runtimes configured with `securityMode=auth-code`, use CLI `v0.1.6` or later and pass `--auth-code` or `FOGGY_RUNTIME_API_AUTH_CODE`. This auth-code path is separate from the current public sales-drop demo baseline above.
+
+Copyable first prompt for an LLM session:
+
+```text
+Use foggy-runtime-cli v0.1.5, the foggy-ai-analysis-demo Skill v0.1.5 assets from the public CLI release, and Java launcher runtime-api-launcher-v0.1.1. Start the Java runtime on http://127.0.0.1:18066 with a SQLite default datasource, then run foggy-runtime demo sales-drop replay with --use-default-datasource and the same SQLite path. Record commands, checksums, runtime URL, namespace salesdrop, question-bank totals, evidence files, failures, and fixes. Do not require namespace-bound datasource execution; production permission/auth/RBAC/audit/governance are out of scope for this demo.
+```
+
 ## Installation
 
 Windows PowerShell from GitHub Release:
 
 ```powershell
-$version = "0.1.3"
+$version = "0.1.6"
 $download = Join-Path $env:TEMP "foggy-runtime-cli-install-$version"
 New-Item -ItemType Directory -Force -Path $download | Out-Null
 Invoke-WebRequest `
@@ -23,7 +116,7 @@ python -m pip show foggy-runtime-cli
 Linux/macOS from GitHub Release:
 
 ```bash
-version="0.1.3"
+version="0.1.6"
 download="${TMPDIR:-/tmp}/foggy-runtime-cli-install-$version"
 mkdir -p "$download"
 curl -fsSL "https://github.com/foggy-projects/foggy-runtime-cli/releases/download/v$version/install-foggy-runtime-cli.sh" -o "$download/install-foggy-runtime-cli.sh"
@@ -35,7 +128,7 @@ python -m pip show foggy-runtime-cli
 From a released wheel:
 
 ```powershell
-python -m pip install foggy_runtime_cli-0.1.3-py3-none-any.whl
+python -m pip install foggy_runtime_cli-0.1.6-py3-none-any.whl
 foggy-runtime --help
 ```
 
@@ -69,8 +162,8 @@ The release build runs tests by default, builds wheel and sdist artifacts into `
 GitHub releases are created from tags by `.github/workflows/release.yml`:
 
 ```powershell
-git tag -a v0.1.3 -m "Release v0.1.3"
-git push origin v0.1.3
+git tag -a v0.1.6 -m "Release v0.1.6"
+git push origin v0.1.6
 ```
 
 Release assets include:
