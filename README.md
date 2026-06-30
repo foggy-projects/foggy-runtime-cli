@@ -102,13 +102,14 @@ Use foggy-runtime-cli v0.1.5, the foggy-ai-analysis-demo Skill v0.1.5 assets fro
 Windows PowerShell from GitHub Release:
 
 ```powershell
-$version = "0.1.6"
+$version = "0.1.7"
 $download = Join-Path $env:TEMP "foggy-runtime-cli-install-$version"
 New-Item -ItemType Directory -Force -Path $download | Out-Null
 Invoke-WebRequest `
   -Uri "https://github.com/foggy-projects/foggy-runtime-cli/releases/download/v$version/install-foggy-runtime-cli.ps1" `
   -OutFile (Join-Path $download "install-foggy-runtime-cli.ps1")
 powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $download "install-foggy-runtime-cli.ps1") -Version $version
+foggy-runtime --version
 foggy-runtime --help
 python -m pip show foggy-runtime-cli
 ```
@@ -116,11 +117,12 @@ python -m pip show foggy-runtime-cli
 Linux/macOS from GitHub Release:
 
 ```bash
-version="0.1.6"
+version="0.1.7"
 download="${TMPDIR:-/tmp}/foggy-runtime-cli-install-$version"
 mkdir -p "$download"
 curl -fsSL "https://github.com/foggy-projects/foggy-runtime-cli/releases/download/v$version/install-foggy-runtime-cli.sh" -o "$download/install-foggy-runtime-cli.sh"
 bash "$download/install-foggy-runtime-cli.sh" --version "$version"
+foggy-runtime --version
 foggy-runtime --help
 python -m pip show foggy-runtime-cli
 ```
@@ -128,7 +130,8 @@ python -m pip show foggy-runtime-cli
 From a released wheel:
 
 ```powershell
-python -m pip install foggy_runtime_cli-0.1.6-py3-none-any.whl
+python -m pip install foggy_runtime_cli-0.1.7-py3-none-any.whl
+foggy-runtime --version
 foggy-runtime --help
 ```
 
@@ -162,8 +165,8 @@ The release build runs tests by default, builds wheel and sdist artifacts into `
 GitHub releases are created from tags by `.github/workflows/release.yml`:
 
 ```powershell
-git tag -a v0.1.6 -m "Release v0.1.6"
-git push origin v0.1.6
+git tag -a v0.1.7 -m "Release v0.1.7"
+git push origin v0.1.7
 ```
 
 Release assets include:
@@ -211,6 +214,8 @@ foggy-runtime --base-url http://127.0.0.1:18066 demo sales-drop replay --skill-d
 ```
 
 JSON output is the default and preserves the Runtime API envelope for Skill consumption.
+
+The CLI configures stdout and stderr as UTF-8 when it owns the process streams, so Windows PowerShell JSON evidence can preserve non-ASCII model metadata. If a host wrapper overrides Python stream configuration, set `PYTHONUTF8=1` or `PYTHONIOENCODING=utf-8` before running `foggy-runtime`.
 
 The CLI is backend-neutral and does not select Java or Python. `--base-url` always wins, followed by `FOGGY_RUNTIME_API_URL`, then the local development default `http://127.0.0.1:8080`.
 

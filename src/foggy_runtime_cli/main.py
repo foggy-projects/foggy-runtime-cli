@@ -11,6 +11,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, TextIO
 
+from . import __version__
 from .client import RuntimeApiClient, RuntimeTransportError, path_quote
 
 EXIT_OK = 0
@@ -33,12 +34,17 @@ def main(
     stdin: TextIO | None = None,
     client_factory: Callable[..., Any] = RuntimeApiClient,
 ) -> int:
-    stdout = stdout or sys.stdout
-    stderr = stderr or sys.stderr
+    effective_argv = sys.argv[1:] if argv is None else argv
+    stdout = configure_utf8_stream(sys.stdout) if stdout is None else stdout
+    stderr = configure_utf8_stream(sys.stderr) if stderr is None else stderr
     stdin = stdin or sys.stdin
 
+    if effective_argv == ["--version"]:
+        print(f"foggy-runtime {__version__}", file=stdout)
+        return EXIT_OK
+
     parser = build_parser()
-    args = parser.parse_args(argv)
+    args = parser.parse_args(effective_argv)
     if args.namespace is None and getattr(args, "default_namespace", None):
         args.namespace = args.default_namespace
 
@@ -94,6 +100,7 @@ def main(
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="foggy-runtime")
+    parser.add_argument("--version", action="store_true", help="Print CLI version and exit.")
     parser.add_argument(
         "--base-url",
         default=None,
@@ -449,6 +456,16 @@ def build_parser() -> argparse.ArgumentParser:
     )
 
     return parser
+
+
+def configure_utf8_stream(stream: TextIO) -> TextIO:
+    reconfigure = getattr(stream, "reconfigure", None)
+    if callable(reconfigure):
+        try:
+            reconfigure(encoding="utf-8")
+        except (AttributeError, OSError, ValueError):
+            pass
+    return stream
 
 
 _BODY_ERROR = object()
