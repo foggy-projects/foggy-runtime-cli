@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 from unittest.mock import patch
 
+from foggy_runtime_cli import __version__
 from foggy_runtime_cli.main import (
     EXIT_API_ERROR,
     EXIT_CLI_ERROR,
@@ -18,6 +19,15 @@ from foggy_runtime_cli.main import (
     console_main,
     main,
 )
+
+
+class ReconfigurableStringIO(io.StringIO):
+    def __init__(self) -> None:
+        super().__init__()
+        self.reconfigure_calls: list[dict[str, Any]] = []
+
+    def reconfigure(self, **kwargs: Any) -> None:
+        self.reconfigure_calls.append(kwargs)
 
 
 class FakeClient:
@@ -64,6 +74,26 @@ class CliTest(unittest.TestCase):
             client_factory=FakeClient,
         )
         return code, stdout.getvalue(), stderr.getvalue()
+
+    def test_version_flag_returns_cli_version(self) -> None:
+        code, output, error = self.run_cli(["--version"])
+
+        self.assertEqual(EXIT_OK, code)
+        self.assertEqual(f"foggy-runtime {__version__}\n", output)
+        self.assertEqual("", error)
+        self.assertEqual([], FakeClient.calls)
+
+    def test_default_streams_are_reconfigured_to_utf8(self) -> None:
+        stdout = ReconfigurableStringIO()
+        stderr = ReconfigurableStringIO()
+
+        with patch("sys.stdout", stdout), patch("sys.stderr", stderr):
+            code = main(["capabilities"], stdin=io.StringIO(""), client_factory=FakeClient)
+
+        self.assertEqual(EXIT_OK, code)
+        self.assertEqual([{"encoding": "utf-8"}], stdout.reconfigure_calls)
+        self.assertEqual([{"encoding": "utf-8"}], stderr.reconfigure_calls)
+        self.assertIn('"success": true', stdout.getvalue())
 
     def test_capabilities_route(self) -> None:
         code, output, error = self.run_cli(["--base-url", "http://runtime", "capabilities"])
