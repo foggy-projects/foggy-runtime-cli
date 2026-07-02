@@ -387,7 +387,7 @@ function Invoke-QuestionBankReplay {
     New-Item -ItemType Directory -Force -Path $payloadDir, $caseEvidenceDir | Out-Null
 
     $qmText = Get-Content -Path $QueryModelPath -Raw -Encoding utf8
-    $availableFields = [regex]::Matches($qmText, 'salesDrop\.([A-Za-z][A-Za-z0-9_]*)') |
+    $availableFields = [regex]::Matches($qmText, 'salesDrop\.([A-Za-z][A-Za-z0-9_]*(?:\$[A-Za-z][A-Za-z0-9_]*)*)') |
         ForEach-Object { $_.Groups[1].Value } |
         Sort-Object -Unique
     $availableFieldSet = @{}

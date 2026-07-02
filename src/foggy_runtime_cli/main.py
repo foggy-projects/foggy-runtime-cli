@@ -1875,7 +1875,12 @@ def demo_available_query_fields(query_model_file: Path | None) -> list[str]:
     if query_model_file is None:
         return []
     text = query_model_file.read_text(encoding="utf-8")
-    return sorted(set(match.group(1) for match in re.finditer(r"salesDrop\.([A-Za-z][A-Za-z0-9_]*)", text)))
+    return sorted(
+        set(
+            match.group(1)
+            for match in re.finditer(r"salesDrop\.([A-Za-z][A-Za-z0-9_]*(?:\$[A-Za-z][A-Za-z0-9_]*)*)", text)
+        )
+    )
 
 
 def demo_read_json_object(path: Path) -> dict[str, Any]:

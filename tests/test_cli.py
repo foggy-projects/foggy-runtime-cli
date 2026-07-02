@@ -17,6 +17,7 @@ from foggy_runtime_cli.main import (
     EXIT_TRANSPORT_ERROR,
     EXIT_UNSUPPORTED,
     console_main,
+    demo_available_query_fields,
     main,
 )
 
@@ -1067,6 +1068,18 @@ class CliTest(unittest.TestCase):
         self.assertFalse(payload["success"])
         self.assertEqual("DEMO_ASSET_MISSING", payload["error"]["code"])
 
+    def test_demo_available_query_fields_supports_date_grains(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            query_model = Path(temp_dir) / "SalesDropDailyQueryModel.qm"
+            query_model.write_text(
+                "salesDrop.observationDate\nsalesDrop.observationDate$week\nsalesDrop.customerName\n",
+                encoding="utf-8",
+            )
+
+            fields = demo_available_query_fields(query_model)
+
+        self.assertEqual(["customerName", "observationDate", "observationDate$week"], fields)
+
     def test_demo_sales_drop_replay_runs_against_runtime_api(self) -> None:
         capabilities = {
             "success": True,
@@ -1097,8 +1110,10 @@ class CliTest(unittest.TestCase):
             "success": True,
             "engine": "java",
             "data": {
-                "items": [{"severity": "CRITICAL", "region": "North China"}],
-                "schema": {"columns": [{"name": "severity"}, {"name": "region"}]},
+                "items": [{"severity": "CRITICAL", "region": "North China", "observationDate$week": 24}],
+                "schema": {
+                    "columns": [{"name": "severity"}, {"name": "region"}, {"name": "observationDate$week"}]
+                },
             },
         }
         FakeClient.responses = [
@@ -1137,7 +1152,7 @@ class CliTest(unittest.TestCase):
             )
             (demo_dir / "data.sql").write_text("insert into sales_drop_daily values (1);", encoding="utf-8")
             (models_dir / "query" / "SalesDropDailyQueryModel.qm").write_text(
-                "salesDrop.severity\nsalesDrop.region\n",
+                "salesDrop.severity\nsalesDrop.region\nsalesDrop.observationDate$week\n",
                 encoding="utf-8",
             )
             (demo_dir / "queries" / "basic.json").write_text(json.dumps({"limit": 1}), encoding="utf-8")
@@ -1159,7 +1174,7 @@ class CliTest(unittest.TestCase):
                                 "payloadFile": "queries/question-bank/SD-001.json",
                                 "assertions": {
                                     "rowCountMin": 1,
-                                    "requiredColumns": ["severity", "region"],
+                                    "requiredColumns": ["severity", "region", "observationDate$week"],
                                     "expectedValues": [{"field": "severity", "value": "CRITICAL"}],
                                 },
                             },
