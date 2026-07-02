@@ -76,6 +76,19 @@ class CliTest(unittest.TestCase):
         )
         return code, stdout.getvalue(), stderr.getvalue()
 
+    @staticmethod
+    def capability_response(capabilities: dict[str, str]) -> dict[str, Any]:
+        return {
+            "success": True,
+            "engine": "java",
+            "runtimeApiVersion": "foggy-runtime-api/v1",
+            "data": {"capabilities": capabilities},
+        }
+
+    @classmethod
+    def supported_capabilities_response(cls, *capabilities: str) -> dict[str, Any]:
+        return cls.capability_response({capability: "supported" for capability in capabilities})
+
     def test_version_flag_returns_cli_version(self) -> None:
         code, output, error = self.run_cli(["--version"])
 
@@ -207,6 +220,11 @@ class CliTest(unittest.TestCase):
         self.assertEqual([], FakeClient.calls)
 
     def test_namespace_and_model_describe_body(self) -> None:
+        FakeClient.responses = [
+            self.supported_capabilities_response("models.describe"),
+            {"success": True, "engine": "java", "data": {}},
+        ]
+
         code, _output, _error = self.run_cli(
             [
                 "--namespace",
@@ -228,6 +246,7 @@ class CliTest(unittest.TestCase):
         self.assertEqual("dev", FakeClient.init_args[1])
         self.assertEqual(
             [
+                ("GET", "/api/v1/capabilities", None),
                 (
                     "POST",
                     "/api/v1/models/Sales%20Model/describe",
@@ -244,17 +263,30 @@ class CliTest(unittest.TestCase):
         )
 
     def test_refresh_models_body(self) -> None:
+        FakeClient.responses = [
+            self.supported_capabilities_response("models.refresh"),
+            {"success": True, "engine": "java", "data": {}},
+        ]
+
         code, _output, _error = self.run_cli(
             ["--namespace", "dev", "models", "refresh", "--model", "A", "--model", "B"]
         )
 
         self.assertEqual(EXIT_OK, code)
         self.assertEqual(
-            [("POST", "/api/v1/models/refresh", {"namespace": "dev", "models": ["A", "B"]})],
+            [
+                ("GET", "/api/v1/capabilities", None),
+                ("POST", "/api/v1/models/refresh", {"namespace": "dev", "models": ["A", "B"]}),
+            ],
             FakeClient.calls,
         )
 
     def test_validate_models_dir_body(self) -> None:
+        FakeClient.responses = [
+            self.supported_capabilities_response("models.validate"),
+            {"success": True, "engine": "java", "data": {}},
+        ]
+
         code, _output, _error = self.run_cli(
             [
                 "--namespace",
@@ -271,6 +303,7 @@ class CliTest(unittest.TestCase):
         self.assertEqual(EXIT_OK, code)
         self.assertEqual(
             [
+                ("GET", "/api/v1/capabilities", None),
                 (
                     "POST",
                     "/api/v1/models/validate",
@@ -287,14 +320,24 @@ class CliTest(unittest.TestCase):
         )
 
     def test_validate_models_dir_can_disable_clear_existing(self) -> None:
+        FakeClient.responses = [
+            self.supported_capabilities_response("models.validate"),
+            {"success": True, "engine": "java", "data": {}},
+        ]
+
         code, _output, _error = self.run_cli(
             ["models", "validate", "--models-dir", "./models", "--no-clear-existing"]
         )
 
         self.assertEqual(EXIT_OK, code)
-        self.assertEqual(False, FakeClient.calls[0][2]["clearExisting"])
+        self.assertEqual(False, FakeClient.calls[1][2]["clearExisting"])
 
     def test_query_payload_from_stdin(self) -> None:
+        FakeClient.responses = [
+            self.supported_capabilities_response("query.validate"),
+            {"success": True, "engine": "java", "data": {}},
+        ]
+
         code, _output, _error = self.run_cli(
             ["query", "validate", "FactSales", "--payload", "-"],
             stdin=json.dumps({"columns": ["amount"], "limit": 1}),
@@ -303,6 +346,7 @@ class CliTest(unittest.TestCase):
         self.assertEqual(EXIT_OK, code)
         self.assertEqual(
             [
+                ("GET", "/api/v1/capabilities", None),
                 (
                     "POST",
                     "/api/v1/query/FactSales/validate",
@@ -312,7 +356,85 @@ class CliTest(unittest.TestCase):
             FakeClient.calls,
         )
 
+    def test_query_payload_normalizes_group_by_string_array(self) -> None:
+        FakeClient.responses = [
+            self.supported_capabilities_response("query.validate"),
+            {"success": True, "engine": "java", "data": {}},
+        ]
+
+        code, _output, _error = self.run_cli(
+            ["query", "validate", "FactSales", "--payload", "-"],
+            stdin=json.dumps(
+                {
+                    "columns": ["customerName", "sum(amount) as totalAmount"],
+                    "groupBy": ["customerName", {"field": "customerSegment"}],
+                    "limit": 10,
+                }
+            ),
+        )
+
+        self.assertEqual(EXIT_OK, code)
+        self.assertEqual(
+            [
+                ("GET", "/api/v1/capabilities", None),
+                (
+                    "POST",
+                    "/api/v1/query/FactSales/validate",
+                    {
+                        "columns": ["customerName", "sum(amount) as totalAmount"],
+                        "groupBy": [
+                            {"field": "customerName"},
+                            {"field": "customerSegment"},
+                        ],
+                        "limit": 10,
+                    },
+                )
+            ],
+            FakeClient.calls,
+        )
+
+    def test_query_payload_normalizes_wrapped_group_by_string_array(self) -> None:
+        FakeClient.responses = [
+            self.supported_capabilities_response("query.execute"),
+            {"success": True, "engine": "java", "data": {}},
+        ]
+
+        code, _output, _error = self.run_cli(
+            ["query", "execute", "FactSales", "--payload", "-"],
+            stdin=json.dumps(
+                {
+                    "payload": {
+                        "columns": ["customerName", "sum(amount) as totalAmount"],
+                        "groupBy": ["customerName"],
+                    }
+                }
+            ),
+        )
+
+        self.assertEqual(EXIT_OK, code)
+        self.assertEqual(
+            [
+                ("GET", "/api/v1/capabilities", None),
+                (
+                    "POST",
+                    "/api/v1/query/FactSales/execute",
+                    {
+                        "payload": {
+                            "columns": ["customerName", "sum(amount) as totalAmount"],
+                            "groupBy": [{"field": "customerName"}],
+                        }
+                    },
+                )
+            ],
+            FakeClient.calls,
+        )
+
     def test_query_execute_payload_from_file(self) -> None:
+        FakeClient.responses = [
+            self.supported_capabilities_response("query.execute"),
+            {"success": True, "engine": "java", "data": {}},
+        ]
+
         with tempfile.TemporaryDirectory() as temp_dir:
             payload_path = Path(temp_dir) / "payload.json"
             payload_path.write_text(json.dumps({"columns": ["amount"], "limit": 10}), encoding="utf-8")
@@ -322,6 +444,7 @@ class CliTest(unittest.TestCase):
         self.assertEqual(EXIT_OK, code)
         self.assertEqual(
             [
+                ("GET", "/api/v1/capabilities", None),
                 (
                     "POST",
                     "/api/v1/query/Fact%20Sales/execute",
@@ -332,6 +455,11 @@ class CliTest(unittest.TestCase):
         )
 
     def test_table_inspect_body(self) -> None:
+        FakeClient.responses = [
+            self.supported_capabilities_response("tables.inspect"),
+            {"success": True, "engine": "java", "data": {}},
+        ]
+
         code, _output, _error = self.run_cli(
             [
                 "tables",
@@ -350,6 +478,7 @@ class CliTest(unittest.TestCase):
         self.assertEqual(EXIT_OK, code)
         self.assertEqual(
             [
+                ("GET", "/api/v1/capabilities", None),
                 (
                     "POST",
                     "/api/v1/tables/inspect",
@@ -365,7 +494,49 @@ class CliTest(unittest.TestCase):
             FakeClient.calls,
         )
 
+    def test_table_inspect_omits_foreign_keys_when_unspecified(self) -> None:
+        FakeClient.responses = [
+            self.supported_capabilities_response("tables.inspect"),
+            {"success": True, "engine": "java", "data": {}},
+        ]
+
+        code, _output, _error = self.run_cli(["tables", "inspect", "--table", "sale_order"])
+
+        self.assertEqual(EXIT_OK, code)
+        self.assertEqual(
+            [
+                ("GET", "/api/v1/capabilities", None),
+                (
+                    "POST",
+                    "/api/v1/tables/inspect",
+                    {
+                        "table": "sale_order",
+                        "includeIndexes": False,
+                    },
+                ),
+            ],
+            FakeClient.calls,
+        )
+
+    def test_table_inspect_can_disable_foreign_keys(self) -> None:
+        FakeClient.responses = [
+            self.supported_capabilities_response("tables.inspect"),
+            {"success": True, "engine": "java", "data": {}},
+        ]
+
+        code, _output, _error = self.run_cli(
+            ["tables", "inspect", "--table", "sale_order", "--no-foreign-keys"]
+        )
+
+        self.assertEqual(EXIT_OK, code)
+        self.assertEqual(False, FakeClient.calls[1][2]["includeForeignKeys"])
+
     def test_query_execute_payload_file_accepts_utf8_bom(self) -> None:
+        FakeClient.responses = [
+            self.supported_capabilities_response("query.execute"),
+            {"success": True, "engine": "java", "data": {}},
+        ]
+
         with tempfile.TemporaryDirectory() as temp_dir:
             payload_path = Path(temp_dir) / "payload.json"
             payload_path.write_text(json.dumps({"columns": ["amount"], "limit": 10}), encoding="utf-8-sig")
@@ -375,6 +546,7 @@ class CliTest(unittest.TestCase):
         self.assertEqual(EXIT_OK, code)
         self.assertEqual(
             [
+                ("GET", "/api/v1/capabilities", None),
                 (
                     "POST",
                     "/api/v1/query/Fact%20Sales/execute",
@@ -385,6 +557,11 @@ class CliTest(unittest.TestCase):
         )
 
     def test_query_payload_from_stdin_accepts_utf8_bom(self) -> None:
+        FakeClient.responses = [
+            self.supported_capabilities_response("query.validate"),
+            {"success": True, "engine": "java", "data": {}},
+        ]
+
         code, _output, _error = self.run_cli(
             ["query", "validate", "FactSales", "--payload", "-"],
             stdin="\ufeff" + json.dumps({"columns": ["amount"], "limit": 1}),
@@ -393,6 +570,7 @@ class CliTest(unittest.TestCase):
         self.assertEqual(EXIT_OK, code)
         self.assertEqual(
             [
+                ("GET", "/api/v1/capabilities", None),
                 (
                     "POST",
                     "/api/v1/query/FactSales/validate",
@@ -532,6 +710,48 @@ class CliTest(unittest.TestCase):
         self.assertIn('"code": "UNSUPPORTED_OPERATION"', output)
         self.assertIn('"phase": "sql.query"', output)
 
+    def test_query_execute_unsupported_capability_stops_before_route(self) -> None:
+        FakeClient.responses = [
+            self.capability_response({"query.execute": "unsupported"}),
+        ]
+
+        code, output, error = self.run_cli(
+            ["query", "execute", "FactSales", "--payload", "-"],
+            stdin=json.dumps({"columns": ["amount"]}),
+        )
+
+        self.assertEqual(EXIT_UNSUPPORTED, code)
+        self.assertEqual("", error)
+        self.assertEqual([("GET", "/api/v1/capabilities", None)], FakeClient.calls)
+        self.assertIn('"code": "UNSUPPORTED_OPERATION"', output)
+        self.assertIn('"phase": "query.execute"', output)
+
+    def test_models_refresh_unsupported_capability_stops_before_route(self) -> None:
+        FakeClient.responses = [
+            self.capability_response({"models.refresh": "unsupported"}),
+        ]
+
+        code, output, error = self.run_cli(["models", "refresh", "--model", "FactSales"])
+
+        self.assertEqual(EXIT_UNSUPPORTED, code)
+        self.assertEqual("", error)
+        self.assertEqual([("GET", "/api/v1/capabilities", None)], FakeClient.calls)
+        self.assertIn('"code": "UNSUPPORTED_OPERATION"', output)
+        self.assertIn('"phase": "models.refresh"', output)
+
+    def test_tables_inspect_unsupported_capability_stops_before_route(self) -> None:
+        FakeClient.responses = [
+            self.capability_response({"tables.inspect": "unsupported"}),
+        ]
+
+        code, output, error = self.run_cli(["tables", "inspect", "--table", "sale_order"])
+
+        self.assertEqual(EXIT_UNSUPPORTED, code)
+        self.assertEqual("", error)
+        self.assertEqual([("GET", "/api/v1/capabilities", None)], FakeClient.calls)
+        self.assertIn('"code": "UNSUPPORTED_OPERATION"', output)
+        self.assertIn('"phase": "tables.inspect"', output)
+
     def test_bundles_list_checks_capability(self) -> None:
         FakeClient.responses = [
             {
@@ -652,6 +872,34 @@ class CliTest(unittest.TestCase):
             ],
             FakeClient.calls,
         )
+
+    def test_bundles_update_omits_watch_when_unspecified(self) -> None:
+        FakeClient.responses = [
+            self.supported_capabilities_response("bundles.update"),
+            {"success": True, "engine": "java", "data": {"bundle": {"name": "sales-drop-dev"}}},
+        ]
+
+        code, _output, error = self.run_cli(
+            ["bundles", "update", "sales-drop-dev", "--path", "./models-v2"]
+        )
+
+        self.assertEqual(EXIT_OK, code)
+        self.assertEqual("", error)
+        self.assertNotIn("watch", FakeClient.calls[1][2])
+
+    def test_bundles_update_can_disable_watch(self) -> None:
+        FakeClient.responses = [
+            self.supported_capabilities_response("bundles.update"),
+            {"success": True, "engine": "java", "data": {"bundle": {"name": "sales-drop-dev"}}},
+        ]
+
+        code, _output, error = self.run_cli(
+            ["bundles", "update", "sales-drop-dev", "--path", "./models-v2", "--no-watch"]
+        )
+
+        self.assertEqual(EXIT_OK, code)
+        self.assertEqual("", error)
+        self.assertEqual(False, FakeClient.calls[1][2]["watch"])
 
     def test_bundles_remove_path_and_capability(self) -> None:
         FakeClient.responses = [
@@ -854,6 +1102,24 @@ class CliTest(unittest.TestCase):
                     "/api/v1/namespaces/dev%20ns/datasource",
                     {"namespace": "dev ns", "dataSource": "sales-sqlite"},
                 ),
+            ],
+            FakeClient.calls,
+        )
+
+    def test_datasources_binding_path(self) -> None:
+        FakeClient.responses = [
+            self.supported_capabilities_response("datasources.bind"),
+            {"success": True, "engine": "java", "data": {"namespace": "dev ns", "dataSource": "sales-sqlite"}},
+        ]
+
+        code, _output, error = self.run_cli(["datasources", "binding", "--namespace", "dev ns"])
+
+        self.assertEqual(EXIT_OK, code)
+        self.assertEqual("", error)
+        self.assertEqual(
+            [
+                ("GET", "/api/v1/capabilities", None),
+                ("GET", "/api/v1/namespaces/dev%20ns/datasource", None),
             ],
             FakeClient.calls,
         )
@@ -1479,12 +1745,18 @@ class CliTest(unittest.TestCase):
         )
 
     def test_models_list_pretty_output(self) -> None:
-        FakeClient.response = {"success": True, "engine": "java", "data": {"models": ["FactSales", "DimCustomer"]}}
+        FakeClient.responses = [
+            self.supported_capabilities_response("models.list"),
+            {"success": True, "engine": "java", "data": {"models": ["FactSales", "DimCustomer"]}},
+        ]
 
         code, output, _error = self.run_cli(["--output", "pretty", "models", "list"])
 
         self.assertEqual(EXIT_OK, code)
-        self.assertEqual([("GET", "/api/v1/models", None)], FakeClient.calls)
+        self.assertEqual(
+            [("GET", "/api/v1/capabilities", None), ("GET", "/api/v1/models", None)],
+            FakeClient.calls,
+        )
         self.assertEqual("FactSales\nDimCustomer\n", output)
 
     def test_capabilities_pretty_output(self) -> None:

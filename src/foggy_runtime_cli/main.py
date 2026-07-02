@@ -154,7 +154,10 @@ def build_parser() -> argparse.ArgumentParser:
     bundle_update = bundle_commands.add_parser("update")
     bundle_update.add_argument("bundle")
     bundle_update.add_argument("--path", dest="bundle_path", required=True)
-    bundle_update.add_argument("--watch", action="store_true")
+    bundle_watch = bundle_update.add_mutually_exclusive_group()
+    bundle_watch.add_argument("--watch", dest="watch", action="store_true")
+    bundle_watch.add_argument("--no-watch", dest="watch", action="store_false")
+    bundle_update.set_defaults(watch=None)
     bundle_update.add_argument("--validate", action="store_true")
     bundle_update.add_argument("--refresh", action="store_true")
     bundle_update.add_argument("--disabled", dest="enabled", action="store_false", default=True)
@@ -166,10 +169,9 @@ def build_parser() -> argparse.ArgumentParser:
 
     bundle_remove = bundle_commands.add_parser("remove")
     bundle_remove.add_argument("bundle")
-    bundle_remove.add_argument("--refresh", action="store_true")
     bundle_remove.set_defaults(
         method="DELETE",
-        body_builder=bundle_remove_body,
+        body_builder=no_body,
         required_capabilities=["bundles.remove"],
     )
 
@@ -237,6 +239,14 @@ def build_parser() -> argparse.ArgumentParser:
         required_capabilities=["datasources.bind"],
     )
 
+    datasource_binding = datasource_commands.add_parser("binding")
+    datasource_binding.add_argument("--namespace", dest="bind_namespace", required=True)
+    datasource_binding.set_defaults(
+        method="GET",
+        body_builder=no_body,
+        required_capabilities=["datasources.bind"],
+    )
+
     resources = subparsers.add_parser("resources")
     resource_commands = resources.add_subparsers(dest="resources_command", required=True)
 
@@ -268,7 +278,12 @@ def build_parser() -> argparse.ArgumentParser:
     model_commands = models.add_subparsers(dest="models_command", required=True)
 
     model_list = model_commands.add_parser("list")
-    model_list.set_defaults(method="GET", path="/api/v1/models", body_builder=no_body)
+    model_list.set_defaults(
+        method="GET",
+        path="/api/v1/models",
+        body_builder=no_body,
+        required_capabilities=["models.list"],
+    )
 
     describe = model_commands.add_parser("describe")
     describe.add_argument("model")
@@ -276,11 +291,16 @@ def build_parser() -> argparse.ArgumentParser:
     describe.add_argument("--field", action="append", dest="fields", default=None)
     describe.add_argument("--level", action="append", dest="levels", type=int, default=None)
     describe.add_argument("--include-examples", action="store_true")
-    describe.set_defaults(method="POST", body_builder=describe_body)
+    describe.set_defaults(method="POST", body_builder=describe_body, required_capabilities=["models.describe"])
 
     refresh = model_commands.add_parser("refresh")
     refresh.add_argument("--model", action="append", dest="models", default=None)
-    refresh.set_defaults(method="POST", path="/api/v1/models/refresh", body_builder=refresh_body)
+    refresh.set_defaults(
+        method="POST",
+        path="/api/v1/models/refresh",
+        body_builder=refresh_body,
+        required_capabilities=["models.refresh"],
+    )
 
     validate = model_commands.add_parser("validate")
     validate.add_argument("--models-dir", required=True)
@@ -288,7 +308,12 @@ def build_parser() -> argparse.ArgumentParser:
     validate.add_argument("--clear-existing", dest="clear_existing", action="store_true", default=True)
     validate.add_argument("--no-clear-existing", dest="clear_existing", action="store_false")
     validate.add_argument("--include-stack-trace", action="store_true")
-    validate.set_defaults(method="POST", path="/api/v1/models/validate", body_builder=model_validate_body)
+    validate.set_defaults(
+        method="POST",
+        path="/api/v1/models/validate",
+        body_builder=model_validate_body,
+        required_capabilities=["models.validate"],
+    )
 
     query = subparsers.add_parser("query")
     query_commands = query.add_subparsers(dest="query_command", required=True)
@@ -296,12 +321,22 @@ def build_parser() -> argparse.ArgumentParser:
     query_validate = query_commands.add_parser("validate")
     query_validate.add_argument("model")
     query_validate.add_argument("--payload", required=True)
-    query_validate.set_defaults(method="POST", body_builder=query_payload_body, query_action="validate")
+    query_validate.set_defaults(
+        method="POST",
+        body_builder=query_payload_body,
+        query_action="validate",
+        required_capabilities=["query.validate"],
+    )
 
     query_execute = query_commands.add_parser("execute")
     query_execute.add_argument("model")
     query_execute.add_argument("--payload", required=True)
-    query_execute.set_defaults(method="POST", body_builder=query_payload_body, query_action="execute")
+    query_execute.set_defaults(
+        method="POST",
+        body_builder=query_payload_body,
+        query_action="execute",
+        required_capabilities=["query.execute"],
+    )
 
     compose = subparsers.add_parser("compose")
     compose_commands = compose.add_subparsers(dest="compose_command", required=True)
@@ -370,8 +405,16 @@ def build_parser() -> argparse.ArgumentParser:
     inspect.add_argument("--schema")
     inspect.add_argument("--data-source")
     inspect.add_argument("--include-indexes", action="store_true")
-    inspect.add_argument("--include-foreign-keys", action="store_true")
-    inspect.set_defaults(method="POST", path="/api/v1/tables/inspect", body_builder=table_inspect_body)
+    foreign_keys = inspect.add_mutually_exclusive_group()
+    foreign_keys.add_argument("--include-foreign-keys", dest="include_foreign_keys", action="store_true")
+    foreign_keys.add_argument("--no-foreign-keys", dest="include_foreign_keys", action="store_false")
+    inspect.set_defaults(
+        method="POST",
+        path="/api/v1/tables/inspect",
+        body_builder=table_inspect_body,
+        required_capabilities=["tables.inspect"],
+        include_foreign_keys=None,
+    )
 
     sql = subparsers.add_parser("sql")
     sql_commands = sql.add_subparsers(dest="sql_command", required=True)
@@ -617,7 +660,7 @@ def build_body(args: argparse.Namespace, stdin: TextIO, stderr: TextIO) -> dict[
         args.path = f"/api/v1/datasources/{path_quote(args.datasource)}"
     if getattr(args, "datasources_command", None) == "test":
         args.path = f"/api/v1/datasources/{path_quote(args.datasource)}/test"
-    if getattr(args, "datasources_command", None) == "bind":
+    if getattr(args, "datasources_command", None) in {"bind", "binding"}:
         args.path = f"/api/v1/namespaces/{path_quote(args.bind_namespace)}/datasource"
     try:
         return args.body_builder(args, stdin)
@@ -649,21 +692,13 @@ def bundle_update_body(args: argparse.Namespace, _stdin: TextIO) -> dict[str, An
     body: dict[str, Any] = {
         "name": args.bundle,
         "path": args.bundle_path,
-        "watch": args.watch,
         "replace": True,
         "validate": args.validate,
         "refresh": args.refresh,
         "enabled": args.enabled,
     }
-    if args.namespace:
-        body["namespace"] = args.namespace
-    return body
-
-
-def bundle_remove_body(args: argparse.Namespace, _stdin: TextIO) -> dict[str, Any] | None:
-    if not args.refresh and not args.namespace:
-        return None
-    body: dict[str, Any] = {"refresh": args.refresh}
+    if args.watch is not None:
+        body["watch"] = args.watch
     if args.namespace:
         body["namespace"] = args.namespace
     return body
@@ -804,15 +839,39 @@ def model_validate_body(args: argparse.Namespace, _stdin: TextIO) -> dict[str, A
 
 
 def query_payload_body(args: argparse.Namespace, stdin: TextIO) -> dict[str, Any]:
-    return read_json_payload(args.payload, stdin)
+    return normalize_query_payload_for_runtime_api(read_json_payload(args.payload, stdin))
+
+
+def normalize_query_payload_for_runtime_api(payload: dict[str, Any]) -> dict[str, Any]:
+    """Normalize public DSL shorthands to the current Runtime API v1 DTO shape."""
+    body = dict(payload)
+    normalize_group_by_items(body)
+    for wrapper_key in ("payload", "request"):
+        nested = body.get(wrapper_key)
+        if isinstance(nested, dict):
+            normalized_nested = dict(nested)
+            normalize_group_by_items(normalized_nested)
+            body[wrapper_key] = normalized_nested
+    return body
+
+
+def normalize_group_by_items(payload: dict[str, Any]) -> None:
+    group_by = payload.get("groupBy")
+    if not isinstance(group_by, list):
+        return
+    payload["groupBy"] = [
+        {"field": item} if isinstance(item, str) else item
+        for item in group_by
+    ]
 
 
 def table_inspect_body(args: argparse.Namespace, _stdin: TextIO) -> dict[str, Any]:
     body: dict[str, Any] = {
         "table": args.table,
         "includeIndexes": args.include_indexes,
-        "includeForeignKeys": args.include_foreign_keys,
     }
+    if args.include_foreign_keys is not None:
+        body["includeForeignKeys"] = args.include_foreign_keys
     if args.schema:
         body["schema"] = args.schema
     if args.data_source:

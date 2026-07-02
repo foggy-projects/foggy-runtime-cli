@@ -1,5 +1,5 @@
 param(
-    [string]$Version = "0.1.6",
+    [string]$Version = "0.1.8",
     [string]$Repo = "foggy-projects/foggy-runtime-cli",
     [string]$Python = "python",
     [string]$DownloadDir = "",
