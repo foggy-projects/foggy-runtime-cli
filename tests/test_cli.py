@@ -967,6 +967,58 @@ class CliTest(unittest.TestCase):
             FakeClient.calls,
         )
 
+    def test_datasources_diagnostics_uses_list_route_and_capability(self) -> None:
+        FakeClient.responses = [
+            self.supported_capabilities_response("datasources.list"),
+            {
+                "success": True,
+                "engine": "java",
+                "data": {
+                    "datasources": [
+                        {
+                            "name": "sales-mysql",
+                            "origin": "runtime-api",
+                            "pool": {
+                                "lifecycleStatus": "open",
+                                "poolExists": True,
+                                "activeConnections": 0,
+                            },
+                        }
+                    ]
+                },
+            },
+        ]
+
+        code, output, error = self.run_cli(["datasources", "diagnostics"])
+
+        payload = json.loads(output)
+        self.assertEqual(EXIT_OK, code)
+        self.assertEqual("", error)
+        self.assertEqual(
+            [
+                ("GET", "/api/v1/capabilities", None),
+                ("GET", "/api/v1/datasources", None),
+            ],
+            FakeClient.calls,
+        )
+        self.assertEqual("open", payload["data"]["datasources"][0]["pool"]["lifecycleStatus"])
+
+    def test_datasources_help_includes_diagnostics(self) -> None:
+        stdout = io.StringIO()
+
+        with patch("sys.stdout", stdout):
+            with self.assertRaises(SystemExit) as raised:
+                main(
+                    ["datasources", "--help"],
+                    stdout=io.StringIO(),
+                    stderr=io.StringIO(),
+                    stdin=io.StringIO(""),
+                    client_factory=FakeClient,
+                )
+
+        self.assertEqual(0, raised.exception.code)
+        self.assertIn("diagnostics", stdout.getvalue())
+
     def test_datasources_add_body(self) -> None:
         FakeClient.responses = [
             {

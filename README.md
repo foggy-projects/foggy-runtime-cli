@@ -89,7 +89,7 @@ Expected replay result:
 question-bank total=12 executable=11 pass=11 fail=0 needs-clarification=1
 ```
 
-Current boundary: `--use-default-datasource` is required for the public sales-drop end-to-end path. Runtime API-managed named datasources are useful for table discovery and read-only SQL probing, but current Java model validation, refresh, describe, and query execution use the runtime default datasource. The launcher is dev/test-only and reports `securityMode=none-dev-test-only`; production permission, auth, RBAC, audit, and governance are deferred.
+Current public release boundary: `--use-default-datasource` is required for the public sales-drop end-to-end path with the released launcher baseline above. Newer 9.2.12 Runtime API builds support namespace-bound Runtime API-managed datasources for table discovery, read-only SQL probing, model validation, model refresh, model describe, and query execution. The launcher is dev/test-only and reports `securityMode=none-dev-test-only`; production permission, auth, RBAC, audit, and governance are deferred.
 
 For Skill v0.1.6, the replay must reseed the Java runtime default SQLite file with the Skill-bundled `schema.sql` and `data.sql`. Reusing an older `sales_drop_daily` table can leave out customer dimension columns required by the v0.1.6 TM/QM.
 
@@ -98,7 +98,7 @@ For Runtime API management operations against runtimes configured with `security
 Copyable first prompt for an LLM session:
 
 ```text
-Use foggy-runtime-cli v0.1.8, the independent foggy-ai-analysis-demo Skill v0.1.6 release assets, and Java launcher runtime-api-launcher-v0.1.1. Start the Java runtime on http://127.0.0.1:18066 with a SQLite default datasource, then run foggy-runtime demo sales-drop replay with --use-default-datasource and the same SQLite path so the v0.1.6 schema.sql/data.sql reseeds the runtime default SQLite file. Record commands, checksums, runtime URL, namespace salesdrop, question-bank totals, evidence files, failures, and fixes. Do not require namespace-bound datasource execution; production permission/auth/RBAC/audit/governance are out of scope for this demo.
+Use foggy-runtime-cli v0.1.8, the independent foggy-ai-analysis-demo Skill v0.1.6 release assets, and Java launcher runtime-api-launcher-v0.1.1. Start the Java runtime on http://127.0.0.1:18066 with a SQLite default datasource, then run foggy-runtime demo sales-drop replay with --use-default-datasource and the same SQLite path so the v0.1.6 schema.sql/data.sql reseeds the runtime default SQLite file. Record commands, checksums, runtime URL, namespace salesdrop, question-bank totals, evidence files, failures, and fixes. For this released public demo baseline, do not require namespace-bound datasource execution; production permission/auth/RBAC/audit/governance are out of scope.
 ```
 
 ## Installation
@@ -264,6 +264,8 @@ Automation and Skills should keep using JSON output so they can validate the ful
 
 `datasources binding --namespace <namespace>` reads the namespace datasource binding with `GET /api/v1/namespaces/{namespace}/datasource`; `datasources bind` updates it with `PUT`.
 
+`datasources diagnostics` calls `GET /api/v1/datasources` and is intended as the human/debug view for Runtime API-managed datasource state. Newer runtimes include a `pool` object per datasource with lifecycle status, active connection count, last borrow/return timestamps, and pool settings; older runtimes still work when they support `datasources.list`.
+
 `tables inspect` sends `includeForeignKeys` only when `--include-foreign-keys` or `--no-foreign-keys` is explicitly provided. Use `--include-indexes` when index metadata is needed.
 
 `resources pull|save` syncs `.tm`, `.qm`, and model-list files for a named filesystem bundle. Save is allowed only for Runtime API-owned bundles. The current Runtime API accepts `--validate` and `--refresh` on save but returns warnings; run `models validate` and `models refresh` explicitly when evidence is needed.
@@ -339,7 +341,7 @@ java -Dfile.encoding=UTF-8 -jar foggy-mcp-launcher-9.1.0.beta-runtime-api.jar `
 
 This mode seeds the bundled SQLite fixture into the runtime default datasource, tests that datasource, inspects the table, runs a read-only SQL sample, validates and registers the bundled TM/QM bundle, refreshes and describes `SalesDropDailyQueryModel`, executes the basic query, and replays the bundled question bank.
 
-The command also supports Runtime API-managed datasource registration without `--use-default-datasource`. That path is useful for table/SQL exploration, but current Java model validation still reads the runtime default datasource; keep the default datasource mode for end-to-end sales-drop replay until the Runtime API model/query layer consumes namespace datasource bindings.
+The command also supports Runtime API-managed datasource registration without `--use-default-datasource`. With newer 9.2.12 Runtime API builds, namespace datasource bindings are consumed by the model/query layer, so Runtime API-managed datasources can support table/SQL exploration and model/query execution. With older released runtimes, keep the default datasource mode for end-to-end sales-drop replay.
 
 Evidence files:
 

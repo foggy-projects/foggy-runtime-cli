@@ -186,6 +186,17 @@ def build_parser() -> argparse.ArgumentParser:
         required_capabilities=["datasources.list"],
     )
 
+    datasource_diagnostics = datasource_commands.add_parser(
+        "diagnostics",
+        help="List datasources with runtime pool diagnostics when the connected runtime reports them.",
+    )
+    datasource_diagnostics.set_defaults(
+        method="GET",
+        path="/api/v1/datasources",
+        body_builder=no_body,
+        required_capabilities=["datasources.list"],
+    )
+
     datasource_add = datasource_commands.add_parser("add")
     datasource_add.add_argument("--name", required=True)
     datasource_add.add_argument(
