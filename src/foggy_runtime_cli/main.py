@@ -188,10 +188,17 @@ def build_parser() -> argparse.ArgumentParser:
 
     datasource_add = datasource_commands.add_parser("add")
     datasource_add.add_argument("--name", required=True)
-    datasource_add.add_argument("--type", default="sqlite", choices=["sqlite"])
+    datasource_add.add_argument(
+        "--type",
+        help="Datasource type label such as sqlite, mysql, postgresql, sqlserver, h2, or mariadb. "
+        "When omitted, the runtime infers it from --jdbc-url.",
+    )
     datasource_add.add_argument("--jdbc-url", required=True)
     datasource_add.add_argument("--username")
-    datasource_add.add_argument("--password-ref")
+    datasource_add_password = datasource_add.add_mutually_exclusive_group()
+    datasource_add_password.add_argument("--password")
+    datasource_add_password.add_argument("--password-env", help="Environment variable containing the datasource password.")
+    datasource_add_password.add_argument("--password-ref")
     datasource_add.add_argument("--replace", action="store_true")
     datasource_add.add_argument("--disabled", dest="enabled", action="store_false", default=True)
     datasource_add.set_defaults(
@@ -203,10 +210,17 @@ def build_parser() -> argparse.ArgumentParser:
 
     datasource_update = datasource_commands.add_parser("update")
     datasource_update.add_argument("datasource")
-    datasource_update.add_argument("--type", default="sqlite", choices=["sqlite"])
+    datasource_update.add_argument(
+        "--type",
+        help="Datasource type label such as sqlite, mysql, postgresql, sqlserver, h2, or mariadb. "
+        "When omitted, the runtime infers it from --jdbc-url.",
+    )
     datasource_update.add_argument("--jdbc-url", required=True)
     datasource_update.add_argument("--username")
-    datasource_update.add_argument("--password-ref")
+    datasource_update_password = datasource_update.add_mutually_exclusive_group()
+    datasource_update_password.add_argument("--password")
+    datasource_update_password.add_argument("--password-env", help="Environment variable containing the datasource password.")
+    datasource_update_password.add_argument("--password-ref")
     datasource_update.add_argument("--disabled", dest="enabled", action="store_false", default=True)
     datasource_update.set_defaults(
         method="PUT",
@@ -707,31 +721,38 @@ def bundle_update_body(args: argparse.Namespace, _stdin: TextIO) -> dict[str, An
 def datasource_add_body(args: argparse.Namespace, _stdin: TextIO) -> dict[str, Any]:
     body: dict[str, Any] = {
         "name": args.name,
-        "type": args.type,
         "jdbcUrl": args.jdbc_url,
         "replace": args.replace,
         "enabled": args.enabled,
     }
-    if args.username:
-        body["username"] = args.username
-    if args.password_ref:
-        body["passwordRef"] = args.password_ref
+    add_datasource_type_and_credentials(body, args)
     return body
 
 
 def datasource_update_body(args: argparse.Namespace, _stdin: TextIO) -> dict[str, Any]:
     body: dict[str, Any] = {
         "name": args.datasource,
-        "type": args.type,
         "jdbcUrl": args.jdbc_url,
         "replace": True,
         "enabled": args.enabled,
     }
+    add_datasource_type_and_credentials(body, args)
+    return body
+
+
+def add_datasource_type_and_credentials(body: dict[str, Any], args: argparse.Namespace) -> None:
+    if args.type:
+        body["type"] = args.type
     if args.username:
         body["username"] = args.username
+    if args.password:
+        body["password"] = args.password
+    if args.password_env:
+        if args.password_env not in os.environ:
+            raise ValueError(f"environment variable is not set: {args.password_env}")
+        body["password"] = os.environ[args.password_env]
     if args.password_ref:
         body["passwordRef"] = args.password_ref
-    return body
 
 
 def datasource_bind_body(args: argparse.Namespace, _stdin: TextIO) -> dict[str, Any]:

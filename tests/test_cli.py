@@ -1044,7 +1044,6 @@ class CliTest(unittest.TestCase):
                     "/api/v1/datasources/sales%20sqlite",
                     {
                         "name": "sales sqlite",
-                        "type": "sqlite",
                         "jdbcUrl": "jdbc:sqlite:./sales-v2.db",
                         "replace": True,
                         "enabled": False,
@@ -1053,6 +1052,81 @@ class CliTest(unittest.TestCase):
             ],
             FakeClient.calls,
         )
+
+    def test_datasources_add_mysql_body_with_password_env(self) -> None:
+        FakeClient.responses = [
+            self.supported_capabilities_response("datasources.add"),
+            {"success": True, "engine": "java", "data": {"datasource": {"name": "sales-mysql"}}},
+        ]
+
+        with patch.dict(os.environ, {"FOGGY_TEST_MYSQL_PASSWORD": "mysql-secret"}, clear=True):
+            code, _output, error = self.run_cli(
+                [
+                    "datasources",
+                    "add",
+                    "--name",
+                    "sales-mysql",
+                    "--type",
+                    "mysql",
+                    "--jdbc-url",
+                    "jdbc:mysql://127.0.0.1:3306/foggy_sales",
+                    "--username",
+                    "foggy",
+                    "--password-env",
+                    "FOGGY_TEST_MYSQL_PASSWORD",
+                    "--replace",
+                ]
+            )
+
+        self.assertEqual(EXIT_OK, code)
+        self.assertEqual("", error)
+        self.assertEqual(
+            [
+                ("GET", "/api/v1/capabilities", None),
+                (
+                    "POST",
+                    "/api/v1/datasources",
+                    {
+                        "name": "sales-mysql",
+                        "type": "mysql",
+                        "jdbcUrl": "jdbc:mysql://127.0.0.1:3306/foggy_sales",
+                        "username": "foggy",
+                        "password": "mysql-secret",
+                        "replace": True,
+                        "enabled": True,
+                    },
+                ),
+            ],
+            FakeClient.calls,
+        )
+
+    def test_datasources_add_password_env_requires_existing_env_var(self) -> None:
+        FakeClient.responses = [
+            self.supported_capabilities_response("datasources.add"),
+        ]
+
+        with patch.dict(os.environ, {}, clear=True):
+            code, output, error = self.run_cli(
+                [
+                    "datasources",
+                    "add",
+                    "--name",
+                    "sales-mysql",
+                    "--type",
+                    "mysql",
+                    "--jdbc-url",
+                    "jdbc:mysql://127.0.0.1:3306/foggy_sales",
+                    "--username",
+                    "foggy",
+                    "--password-env",
+                    "FOGGY_TEST_MYSQL_PASSWORD",
+                ]
+            )
+
+        self.assertEqual(EXIT_CLI_ERROR, code)
+        self.assertEqual("", output)
+        self.assertIn("environment variable is not set: FOGGY_TEST_MYSQL_PASSWORD", error)
+        self.assertEqual([], FakeClient.calls)
 
     def test_datasources_test_path(self) -> None:
         FakeClient.responses = [
