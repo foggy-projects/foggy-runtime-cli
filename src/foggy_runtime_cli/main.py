@@ -1164,7 +1164,7 @@ def demo_sales_drop_plan(args: argparse.Namespace) -> dict[str, Any]:
     warnings = []
     if not launcher_jar.exists():
         warnings.append(
-            "Launcher JAR was not found. Build foggy-mcp-launcher first or pass --launcher-jar."
+            "Foggy Runtime Launcher JAR was not found. Build the foggy-mcp-launcher module or pass --launcher-jar."
         )
 
     return {
