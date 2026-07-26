@@ -38,10 +38,19 @@ class FakeClient:
     raise_error: Exception | None = None
     init_args: tuple[str, str | None, float] | None = None
     auth_code: str | None = None
+    authorization: str | None = None
 
-    def __init__(self, base_url: str, namespace: str | None, timeout: float, auth_code: str | None = None) -> None:
+    def __init__(
+        self,
+        base_url: str,
+        namespace: str | None,
+        timeout: float,
+        auth_code: str | None = None,
+        authorization: str | None = None,
+    ) -> None:
         type(self).init_args = (base_url, namespace, timeout)
         type(self).auth_code = auth_code
+        type(self).authorization = authorization
 
     def request(self, method: str, path: str, body: dict[str, Any] | None) -> dict[str, Any]:
         if type(self).raise_error is not None:
@@ -63,6 +72,7 @@ class CliTest(unittest.TestCase):
         FakeClient.raise_error = None
         FakeClient.init_args = None
         FakeClient.auth_code = None
+        FakeClient.authorization = None
 
     def run_cli(self, argv: list[str], stdin: str = "") -> tuple[int, str, str]:
         stdout = io.StringIO()
@@ -209,6 +219,74 @@ class CliTest(unittest.TestCase):
 
         self.assertEqual(EXIT_OK, code)
         self.assertEqual("runtime-secret", FakeClient.auth_code)
+
+    def test_authorization_option_is_opaque_and_coexists_with_auth_code(self) -> None:
+        FakeClient.responses = [
+            self.supported_capabilities_response("models.list"),
+            {"success": True, "engine": "java", "data": {"models": []}},
+        ]
+        code, output, error = self.run_cli([
+            "--auth-code",
+            "runtime-secret",
+            "--authorization",
+            "Custom opaque value",
+            "models",
+            "list",
+        ])
+
+        self.assertEqual(EXIT_OK, code)
+        self.assertEqual("runtime-secret", FakeClient.auth_code)
+        self.assertEqual("Custom opaque value", FakeClient.authorization)
+        self.assertNotIn("Custom opaque value", output)
+        self.assertNotIn("Custom opaque value", error)
+
+    def test_authorization_env_and_option_precedence(self) -> None:
+        FakeClient.responses = [
+            self.supported_capabilities_response("models.list"),
+            {"success": True, "engine": "java", "data": {"models": []}},
+        ]
+        with patch.dict(
+            os.environ,
+            {"FOGGY_RUNTIME_AUTHORIZATION": "env-opaque"},
+            clear=True,
+        ):
+            code, _output, _error = self.run_cli(["models", "list"])
+        self.assertEqual(EXIT_OK, code)
+        self.assertEqual("env-opaque", FakeClient.authorization)
+
+        FakeClient.responses = [
+            self.supported_capabilities_response("models.list"),
+            {"success": True, "engine": "java", "data": {"models": []}},
+        ]
+        with patch.dict(
+            os.environ,
+            {"FOGGY_RUNTIME_AUTHORIZATION": "env-opaque"},
+            clear=True,
+        ):
+            code, _output, _error = self.run_cli([
+                "--authorization",
+                "option-opaque",
+                "models",
+                "list",
+            ])
+        self.assertEqual(EXIT_OK, code)
+        self.assertEqual("option-opaque", FakeClient.authorization)
+
+    def test_member_list_route(self) -> None:
+        code, _output, _error = self.run_cli([
+            "--authorization",
+            "opaque",
+            "members",
+            "list",
+            "Sales Model",
+            "customer$id",
+        ])
+
+        self.assertEqual(EXIT_OK, code)
+        self.assertEqual(
+            [("POST", "/jdbc-model/dimension/v2/Sales%20Model/customer%24id", None)],
+            FakeClient.calls,
+        )
 
     def test_engine_option_is_not_supported(self) -> None:
         with patch.dict(os.environ, {}, clear=True):

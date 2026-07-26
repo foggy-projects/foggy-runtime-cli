@@ -203,10 +203,12 @@ foggy-runtime resources pull --bundle sales-drop-dev --out ./work-models
 foggy-runtime resources save --bundle sales-drop-dev --dir ./work-models --validate --refresh
 foggy-runtime models list
 foggy-runtime models describe FactSalesQueryModel
+foggy-runtime --authorization $env:FOGGY_RUNTIME_AUTHORIZATION models describe FactSalesQueryModel
 foggy-runtime models refresh --model FactSalesQueryModel
 foggy-runtime models validate --models-dir ./models
 foggy-runtime query validate FactSalesQueryModel --payload query.json
-foggy-runtime query execute FactSalesQueryModel --payload -
+foggy-runtime --authorization $env:FOGGY_RUNTIME_AUTHORIZATION query execute FactSalesQueryModel --payload -
+foggy-runtime --authorization $env:FOGGY_RUNTIME_AUTHORIZATION members list FactSalesQueryModel 'customer$id'
 foggy-runtime compose validate --script compose.fsscript
 foggy-runtime compose preview --script compose.fsscript
 foggy-runtime compose execute --script compose.fsscript
@@ -236,6 +238,16 @@ The CLI configures stdout and stderr as UTF-8 when it owns the process streams, 
 The CLI is backend-neutral and does not select Java or Python. `--base-url` always wins, followed by `FOGGY_RUNTIME_API_URL`, then the local development default `http://127.0.0.1:8080`.
 
 When the connected Runtime API reports `securityMode=auth-code`, pass the shared runtime code with global `--auth-code <code>` or `FOGGY_RUNTIME_API_AUTH_CODE`. The CLI sends it as `X-Foggy-Runtime-Code`, which is required for protected management operations such as bundle add/update/remove, datasource add/test/bind, resources save, models validate, and models refresh. Runtimes using `none-dev-test-only` do not require this option.
+
+Data-plane model permissions use a separate optional credential. Pass the complete
+opaque header value with global `--authorization <value>` or
+`FOGGY_RUNTIME_AUTHORIZATION`; the CLI sends it unchanged as `Authorization` and
+does not add a `Bearer` prefix. It is sent only to model list/describe, query,
+Compose, and dimension-member paths. It is not sent to management operations or
+the full `fsscript run` evaluator. Both options may be supplied together, but
+`--auth-code` never grants model data access and `--authorization` never grants
+management access. Cross-origin redirects do not forward Authorization, and the
+value is redacted if an upstream response echoes it.
 
 Use `wait-ready` after starting a local dev/test runtime. It polls `GET /api/v1/capabilities` until the Runtime API is reachable and returns success; transient transport failures are retained in JSON `data.attempts`.
 

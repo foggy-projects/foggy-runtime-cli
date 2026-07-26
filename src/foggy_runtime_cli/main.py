@@ -57,7 +57,13 @@ def main(
     runtime_handler = getattr(args, "runtime_handler", None)
     if runtime_handler is not None:
         base_url = resolve_base_url(args)
-        client = client_factory(base_url, args.namespace, args.timeout, resolve_auth_code(args))
+        client = client_factory(
+            base_url,
+            args.namespace,
+            args.timeout,
+            resolve_auth_code(args),
+            resolve_authorization(args),
+        )
         response, exit_code = runtime_handler(args, client, base_url)
         render_response(response, args.output, stdout)
         return exit_code
@@ -67,7 +73,13 @@ def main(
         return EXIT_CLI_ERROR
 
     base_url = resolve_base_url(args)
-    client = client_factory(base_url, args.namespace, args.timeout, resolve_auth_code(args))
+    client = client_factory(
+        base_url,
+        args.namespace,
+        args.timeout,
+        resolve_auth_code(args),
+        resolve_authorization(args),
+    )
     required_capabilities = required_capabilities_for(args)
     if required_capabilities:
         try:
@@ -113,6 +125,15 @@ def build_parser() -> argparse.ArgumentParser:
         "--auth-code",
         default=None,
         help="Runtime API auth code. Overrides FOGGY_RUNTIME_API_AUTH_CODE and is sent as X-Foggy-Runtime-Code.",
+    )
+    parser.add_argument(
+        "--authorization",
+        default=None,
+        help=(
+            "Opaque data-plane Authorization header value. Overrides "
+            "FOGGY_RUNTIME_AUTHORIZATION; sent only to model discovery/describe, "
+            "query, member, and Compose paths."
+        ),
     )
 
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -363,6 +384,13 @@ def build_parser() -> argparse.ArgumentParser:
         required_capabilities=["query.execute"],
     )
 
+    members = subparsers.add_parser("members")
+    member_commands = members.add_subparsers(dest="members_command", required=True)
+    member_list = member_commands.add_parser("list")
+    member_list.add_argument("model")
+    member_list.add_argument("dimension")
+    member_list.set_defaults(method="POST", body_builder=no_body)
+
     compose = subparsers.add_parser("compose")
     compose_commands = compose.add_subparsers(dest="compose_command", required=True)
 
@@ -563,6 +591,13 @@ def resolve_auth_code(args: argparse.Namespace) -> str | None:
     return env_auth_code if env_auth_code else None
 
 
+def resolve_authorization(args: argparse.Namespace) -> str | None:
+    if args.authorization is not None:
+        return args.authorization if args.authorization else None
+    env_authorization = os.environ.get("FOGGY_RUNTIME_AUTHORIZATION")
+    return env_authorization if env_authorization else None
+
+
 def wait_ready_handler(
     args: argparse.Namespace,
     client: Any,
@@ -687,6 +722,11 @@ def build_body(args: argparse.Namespace, stdin: TextIO, stderr: TextIO) -> dict[
         args.path = f"/api/v1/datasources/{path_quote(args.datasource)}/test"
     if getattr(args, "datasources_command", None) in {"bind", "binding"}:
         args.path = f"/api/v1/namespaces/{path_quote(args.bind_namespace)}/datasource"
+    if getattr(args, "members_command", None) == "list":
+        args.path = (
+            f"/jdbc-model/dimension/v2/{path_quote(args.model)}/"
+            f"{path_quote(args.dimension)}"
+        )
     try:
         return args.body_builder(args, stdin)
     except (OSError, ValueError) as exc:
