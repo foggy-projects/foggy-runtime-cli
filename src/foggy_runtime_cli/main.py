@@ -384,6 +384,34 @@ def build_parser() -> argparse.ArgumentParser:
         required_capabilities=["query.execute"],
     )
 
+    query_explain = query_commands.add_parser(
+        "explain",
+        description=(
+            "仅当用户要求解释某个查询结果、追问结果如何产生、解释指标或字段从 QM 到 "
+            "TM/物理 SQL 的映射，或者解释权限、预聚合对查询的影响时调用。"
+            "普通查询、模型发现和语义加载不得调用本工具。"
+        ),
+    )
+    query_explain.add_argument("model")
+    query_explain.add_argument(
+        "--payload",
+        help="Semantic query JSON file, or '-' for stdin. Omit for DEFINITION basis.",
+    )
+    query_explain.add_argument("--field", dest="fields", action="append")
+    query_explain.add_argument(
+        "--depth",
+        choices=("summary", "standard", "detailed"),
+        default="standard",
+    )
+    query_explain.add_argument("--include-sql", action="store_true")
+    query_explain.add_argument("--include-physical-names", action="store_true")
+    query_explain.set_defaults(
+        method="POST",
+        body_builder=query_explain_body,
+        query_action="explain",
+        required_capabilities=["query.explain"],
+    )
+
     members = subparsers.add_parser("members")
     member_commands = members.add_subparsers(dest="members_command", required=True)
     member_list = member_commands.add_parser("list")
@@ -912,6 +940,21 @@ def model_validate_body(args: argparse.Namespace, _stdin: TextIO) -> dict[str, A
 
 def query_payload_body(args: argparse.Namespace, stdin: TextIO) -> dict[str, Any]:
     return normalize_query_payload_for_runtime_api(read_json_payload(args.payload, stdin))
+
+
+def query_explain_body(args: argparse.Namespace, stdin: TextIO) -> dict[str, Any]:
+    body: dict[str, Any] = {"depth": args.depth.upper()}
+    if args.fields:
+        body["fields"] = list(args.fields)
+    if args.payload:
+        body["payload"] = normalize_query_payload_for_runtime_api(
+            read_json_payload(args.payload, stdin)
+        )
+    if args.include_sql:
+        body["includeSql"] = True
+    if args.include_physical_names:
+        body["includePhysicalNames"] = True
+    return body
 
 
 def normalize_query_payload_for_runtime_api(payload: dict[str, Any]) -> dict[str, Any]:

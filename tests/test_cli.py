@@ -532,6 +532,88 @@ class CliTest(unittest.TestCase):
             FakeClient.calls,
         )
 
+    def test_query_explain_definition_body(self) -> None:
+        FakeClient.responses = [
+            self.supported_capabilities_response("query.explain"),
+            {"success": True, "engine": "java", "data": {}},
+        ]
+
+        code, _output, error = self.run_cli(
+            [
+                "query", "explain", "Fact Sales",
+                "--field", "amount",
+                "--field", "customer$name",
+                "--include-physical-names",
+            ]
+        )
+
+        self.assertEqual(EXIT_OK, code)
+        self.assertEqual("", error)
+        self.assertEqual(
+            [
+                ("GET", "/api/v1/capabilities", None),
+                (
+                    "POST",
+                    "/api/v1/query/Fact%20Sales/explain",
+                    {
+                        "depth": "STANDARD",
+                        "fields": ["amount", "customer$name"],
+                        "includePhysicalNames": True,
+                    },
+                ),
+            ],
+            FakeClient.calls,
+        )
+
+    def test_query_explain_recompiled_body(self) -> None:
+        FakeClient.responses = [
+            self.supported_capabilities_response("query.explain"),
+            {"success": True, "engine": "java", "data": {}},
+        ]
+
+        code, _output, error = self.run_cli(
+            [
+                "query", "explain", "FactSales",
+                "--payload", "-",
+                "--depth", "detailed",
+                "--include-sql",
+                "--include-physical-names",
+            ],
+            stdin=json.dumps({
+                "columns": ["customer", "sum(amount) as total"],
+                "groupBy": ["customer"],
+            }),
+        )
+
+        self.assertEqual(EXIT_OK, code)
+        self.assertEqual("", error)
+        self.assertEqual(
+            {
+                "depth": "DETAILED",
+                "payload": {
+                    "columns": ["customer", "sum(amount) as total"],
+                    "groupBy": [{"field": "customer"}],
+                },
+                "includeSql": True,
+                "includePhysicalNames": True,
+            },
+            FakeClient.calls[1][2],
+        )
+
+    def test_query_explain_unsupported_capability_stops_before_route(self) -> None:
+        FakeClient.responses = [
+            self.capability_response({"query.explain": "unsupported"}),
+        ]
+
+        code, output, error = self.run_cli(
+            ["query", "explain", "FactSales", "--field", "amount"]
+        )
+
+        self.assertEqual(EXIT_UNSUPPORTED, code)
+        self.assertEqual("", error)
+        self.assertEqual([("GET", "/api/v1/capabilities", None)], FakeClient.calls)
+        self.assertIn('"phase": "query.explain"', output)
+
     def test_table_inspect_body(self) -> None:
         FakeClient.responses = [
             self.supported_capabilities_response("tables.inspect"),
