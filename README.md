@@ -8,9 +8,11 @@ The CLI talks only to `/api/v1/*` runtime endpoints. It does not call Java or Py
 
 Current validated public onboarding baseline:
 
-- CLI: `v0.1.12`
-- `foggy-ai-analysis-demo` independent Skill: `v0.1.6`
-- Foggy Runtime Launcher: `foggy-runtime-launcher-v0.1.3`
+- CLI: `v0.1.22`
+- `foggy-ai-analysis` Skill: `v0.1.16`
+- optional `foggy-semantic-query` Skill: `v0.1.16`
+- Foggy Runtime Launcher: `foggy-runtime-launcher-v0.1.17`
+- Stable stack manifest: `https://raw.githubusercontent.com/foggy-projects/foggy-ai-analysis/main/stack/stable.json`
 - Runtime URL: `http://127.0.0.1:18066`
 - Namespace: `salesdrop`
 - Datasource mode: Java runtime default SQLite datasource
@@ -20,49 +22,41 @@ Prerequisites: Python with pip, Java on `PATH`, and PowerShell.
 Copy this PowerShell path to install the CLI, download the Skill and Foggy Runtime Launcher, start the local runtime, and replay the sales-drop demo:
 
 ```powershell
-$cliVersion = "0.1.12"
-$skillVersion = "0.1.6"
-$launcherTag = "foggy-runtime-launcher-v0.1.3"
-$demoRoot = Join-Path $env:TEMP "foggy-ai-analysis-demo-$skillVersion"
+$stackManifestUrl = "https://raw.githubusercontent.com/foggy-projects/foggy-ai-analysis/main/stack/stable.json"
+$stack = Invoke-RestMethod -Uri $stackManifestUrl
+$cliVersion = $stack.components.cli.recommendedVersion
+$skillVersion = $stack.components.skills.'foggy-ai-analysis'.recommendedVersion
+$launcher = $stack.components.launcher
+$demoRoot = Join-Path $env:TEMP "foggy-ai-analysis-$skillVersion"
 $installDir = Join-Path $demoRoot "cli-install"
-$skillDownload = Join-Path $demoRoot "skill-download"
-$skillUnzip = Join-Path $demoRoot "skill"
 $launcherDir = Join-Path $demoRoot "launcher"
 $runtimeDir = Join-Path $demoRoot "runtime"
 $evidenceDir = Join-Path $demoRoot "evidence"
 
-foreach ($dir in @($installDir, $skillDownload, $skillUnzip, $launcherDir, $runtimeDir, $evidenceDir)) {
+foreach ($dir in @($installDir, $launcherDir, $runtimeDir, $evidenceDir)) {
   New-Item -ItemType Directory -Force -Path $dir | Out-Null
 }
 
 # 1. Install foggy-runtime-cli from the public release.
 Invoke-WebRequest `
-  -Uri "https://github.com/foggy-projects/foggy-runtime-cli/releases/download/v$cliVersion/install-foggy-runtime-cli.ps1" `
+  -Uri $stack.components.cli.install.windows `
   -OutFile (Join-Path $installDir "install-foggy-runtime-cli.ps1")
 powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $installDir "install-foggy-runtime-cli.ps1") -Version $cliVersion
 
-# 2. Download and unpack the independent foggy-ai-analysis-demo Skill assets.
-$skillReleaseBase = "https://github.com/foggy-projects/foggy-ai-analysis-demo/releases/download/v$skillVersion"
-$skillZip = "foggy-ai-analysis-demo-skill-${skillVersion}.zip"
-$skillManifest = "foggy-ai-analysis-demo-skill-${skillVersion}-manifest.json"
-$skillChecksums = "foggy-ai-analysis-demo-skill-${skillVersion}-SHA256SUMS"
-foreach ($asset in @($skillZip, $skillManifest, $skillChecksums)) {
-  Invoke-WebRequest -Uri "$skillReleaseBase/$asset" -OutFile (Join-Path $skillDownload $asset)
-}
-Expand-Archive -Path (Join-Path $skillDownload $skillZip) -DestinationPath $skillUnzip -Force
-$skillDir = Join-Path $skillUnzip "foggy-ai-analysis-demo"
+# 2. Install the formal foggy-ai-analysis Skill from the stable stack recommendation.
+foggy-runtime stack show
+foggy-runtime skills install foggy-ai-analysis --replace
+$skillDir = Join-Path $env:USERPROFILE ".agents\skills\foggy-ai-analysis"
 
-# 3. Download the Foggy Runtime Launcher.
-$launcherBase = "https://github.com/foggy-projects/foggy-data-mcp-bridge/releases/download/$launcherTag"
+# 3. Download the Foggy Runtime Launcher from the same stable stack recommendation.
 foreach ($asset in @(
-  "foggy-runtime-launcher-0.1.3.jar",
-  "start-foggy-runtime.ps1",
-  "start-foggy-runtime.sh",
-  "README-foggy-runtime-launcher.md",
-  "runtime-launcher-manifest.json",
-  "SHA256SUMS"
+  $launcher.assets.jar,
+  $launcher.assets.startPowerShell,
+  $launcher.assets.startShell,
+  $launcher.assets.manifest,
+  $launcher.assets.checksums
 )) {
-  Invoke-WebRequest -Uri "$launcherBase/$asset" -OutFile (Join-Path $launcherDir $asset)
+  Invoke-WebRequest -Uri $asset.url -OutFile (Join-Path $launcherDir $asset.file)
 }
 
 # 4. Start Java with a known SQLite default datasource.
@@ -89,16 +83,16 @@ Expected replay result:
 question-bank total=12 executable=11 pass=11 fail=0 needs-clarification=1
 ```
 
-Current public release boundary: `--use-default-datasource` is required for the public sales-drop end-to-end path with the released launcher baseline above. Newer 9.2.12 Runtime API builds support namespace-bound Runtime API-managed datasources for table discovery, read-only SQL probing, model validation, model refresh, model describe, and query execution. The launcher is dev/test-only and reports `securityMode=none-dev-test-only`; production permission, auth, RBAC, audit, and governance are deferred.
+Current boundary: `--use-default-datasource` is still the public sales-drop replay default because that example owns and reseeds a local SQLite file. For user business data, keep the user datasource separate from sales-drop demo data: register a Runtime API-managed datasource, bind it to the target namespace, validate the bundle, refresh, describe, and run a query smoke against that namespace. Use `datasources diagnostics` to record registry paths and namespace bindings before restart evidence. The launcher is dev/test-only and reports `securityMode=none-dev-test-only`; production permission, auth, RBAC, audit, and governance are deferred.
 
-For Skill v0.1.6, the replay must reseed the Java runtime default SQLite file with the Skill-bundled `schema.sql` and `data.sql`. Reusing an older `sales_drop_daily` table can leave out customer dimension columns required by the v0.1.6 TM/QM.
+For `foggy-ai-analysis` Skill v0.1.16, the replay must reseed the Java runtime default SQLite file with the Skill-bundled `schema.sql` and `data.sql`. Reusing an older `sales_drop_daily` table can leave out customer dimension columns required by the current TM/QM.
 
 For Runtime API management operations against runtimes configured with `securityMode=auth-code`, use CLI `v0.1.6` or later and pass `--auth-code` or `FOGGY_RUNTIME_API_AUTH_CODE`. This auth-code path is separate from the current public sales-drop demo baseline above.
 
 Copyable first prompt for an LLM session:
 
 ```text
-Use foggy-runtime-cli v0.1.12, the independent foggy-ai-analysis-demo Skill v0.1.6 release assets, and Foggy Runtime Launcher `foggy-runtime-launcher-v0.1.3`. Start the Java runtime on http://127.0.0.1:18066 with a SQLite default datasource, then run foggy-runtime demo sales-drop replay with --use-default-datasource and the same SQLite path so the v0.1.6 schema.sql/data.sql reseeds the runtime default SQLite file. Record commands, checksums, runtime URL, namespace salesdrop, question-bank totals, evidence files, failures, and fixes. For this released public demo baseline, do not require namespace-bound datasource execution; production permission/auth/RBAC/audit/governance are out of scope.
+Use foggy-runtime-cli v0.1.22, the formal foggy-ai-analysis Skill v0.1.16 release assets, and Foggy Runtime Launcher `foggy-runtime-launcher-v0.1.17`. Install the Skill into ~/.agents/skills/foggy-ai-analysis, start the Java runtime on http://127.0.0.1:18066 with a SQLite default datasource, then run foggy-runtime demo sales-drop replay with --use-default-datasource and the same SQLite path so the bundled schema.sql/data.sql reseeds the runtime default SQLite file. For user business data, use a separate Runtime API-managed datasource and namespace binding instead of mixing it with the sales-drop SQLite file. Record commands, checksums, runtime URL, namespace, datasource mode, diagnostics, question-bank totals, evidence files, failures, and fixes. Production permission/auth/RBAC/audit/governance are out of scope for this demo.
 ```
 
 ## Installation
@@ -106,7 +100,7 @@ Use foggy-runtime-cli v0.1.12, the independent foggy-ai-analysis-demo Skill v0.1
 Windows PowerShell from GitHub Release:
 
 ```powershell
-$version = "0.1.12"
+$version = "0.1.22"
 $download = Join-Path $env:TEMP "foggy-runtime-cli-install-$version"
 New-Item -ItemType Directory -Force -Path $download | Out-Null
 Invoke-WebRequest `
@@ -121,7 +115,7 @@ python -m pip show foggy-runtime-cli
 Linux/macOS from GitHub Release:
 
 ```bash
-version="0.1.12"
+version="0.1.22"
 download="${TMPDIR:-/tmp}/foggy-runtime-cli-install-$version"
 mkdir -p "$download"
 curl -fsSL "https://github.com/foggy-projects/foggy-runtime-cli/releases/download/v$version/install-foggy-runtime-cli.sh" -o "$download/install-foggy-runtime-cli.sh"
@@ -134,7 +128,7 @@ python -m pip show foggy-runtime-cli
 From a released wheel:
 
 ```powershell
-python -m pip install foggy_runtime_cli-0.1.12-py3-none-any.whl
+python -m pip install foggy_runtime_cli-0.1.22-py3-none-any.whl
 foggy-runtime --version
 foggy-runtime --help
 ```
@@ -149,6 +143,40 @@ cd foggy-runtime-cli
 python -m pip install .
 foggy-runtime --help
 ```
+
+## Skill Install Target
+
+`foggy-runtime skills install` installs supported Foggy Skills only under the agent Skill directory:
+
+```text
+~/.agents/skills/<skill-name>
+```
+
+It does not install or update copies under `~/.codex/skills` or `~/.claude/skills`.
+
+Stable stack install:
+
+```powershell
+foggy-runtime stack show
+foggy-runtime skills install foggy-ai-analysis --replace
+foggy-runtime skills install foggy-semantic-query --replace
+```
+
+Pinned release zip install:
+
+```powershell
+foggy-runtime skills install foggy-ai-analysis --zip .\foggy-ai-analysis-skill-0.1.16.zip --replace
+```
+
+Supported local workspace installs:
+
+```powershell
+foggy-runtime skills install foggy-ai-analysis --workspace-root D:\foggy-projects\foggy-data-mcp
+foggy-runtime skills install foggy-semantic-query --workspace-root D:\foggy-projects\foggy-data-mcp
+foggy-runtime skills install foggy-analysis-suite --workspace-root D:\foggy-projects\foggy-data-mcp
+```
+
+`foggy-analysis-suite` installs both `foggy-ai-analysis` and `foggy-semantic-query`; without `--workspace-root`, it downloads both release zips from the stable stack manifest.
 
 ## Release Packaging
 
@@ -169,8 +197,8 @@ The release build runs tests by default, builds wheel and sdist artifacts into `
 GitHub releases are created from tags by `.github/workflows/release.yml`:
 
 ```powershell
-git tag -a v0.1.12 -m "Release v0.1.12"
-git push origin v0.1.12
+git tag -a v0.1.22 -m "Release v0.1.22"
+git push origin v0.1.22
 ```
 
 Release assets include:
@@ -182,15 +210,16 @@ Release assets include:
 - `install-foggy-runtime-cli.ps1`
 - `install-foggy-runtime-cli.sh`
 
-For `v0.1.2` and later, the public CLI release can also carry companion `foggy-ai-analysis-demo` Skill assets uploaded from the workspace packaging script:
+The formal public Skill release is published from `foggy-projects/foggy-ai-analysis`, not from the CLI release. Download and install the Skill zip when you need the bundled onboarding and sales-drop demo assets:
 
-- `foggy-ai-analysis-demo-skill-<version>.zip`
-- `foggy-ai-analysis-demo-skill-<version>-manifest.json`
-- `foggy-ai-analysis-demo-skill-<version>-SHA256SUMS`
+- `foggy-ai-analysis-skill-<version>.zip`
+- `foggy-ai-analysis-skill-<version>-manifest.json`
+- `foggy-ai-analysis-skill-<version>-SHA256SUMS`
 
 ## Examples
 
 ```powershell
+foggy-runtime stack show
 foggy-runtime --base-url http://127.0.0.1:8080 capabilities
 foggy-runtime --base-url http://127.0.0.1:8080 wait-ready --timeout-seconds 90 --interval-seconds 2
 foggy-runtime --auth-code $env:FOGGY_RUNTIME_API_AUTH_CODE bundles add --name sales-drop-dev --path ./models --namespace default --watch
@@ -198,17 +227,20 @@ foggy-runtime bundles list
 foggy-runtime bundles add --name sales-drop-dev --path ./models --namespace default --watch --validate --refresh
 foggy-runtime bundles update sales-drop-dev --path ./models --watch
 foggy-runtime bundles remove sales-drop-dev
+foggy-runtime datasources add --name local-sqlite --type sqlite --jdbc-url jdbc:sqlite:./runtime.db --replace
+foggy-runtime datasources add --name sales-mysql --type mysql --jdbc-url "jdbc:mysql://127.0.0.1:13308/foggy_demo?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC" --username foggy --password-env FOGGY_MYSQL_PASSWORD --replace
 foggy-runtime datasources binding --namespace default
+foggy-runtime datasources diagnostics
 foggy-runtime resources pull --bundle sales-drop-dev --out ./work-models
 foggy-runtime resources save --bundle sales-drop-dev --dir ./work-models --validate --refresh
 foggy-runtime models list
 foggy-runtime models describe FactSalesQueryModel
-foggy-runtime --authorization $env:FOGGY_RUNTIME_AUTHORIZATION models describe FactSalesQueryModel
 foggy-runtime models refresh --model FactSalesQueryModel
 foggy-runtime models validate --models-dir ./models
 foggy-runtime query validate FactSalesQueryModel --payload query.json
-foggy-runtime --authorization $env:FOGGY_RUNTIME_AUTHORIZATION query execute FactSalesQueryModel --payload -
-foggy-runtime --authorization $env:FOGGY_RUNTIME_AUTHORIZATION members list FactSalesQueryModel 'customer$id'
+foggy-runtime query execute FactSalesQueryModel --payload -
+foggy-runtime query explain FactSalesQueryModel --field totalAmount --include-physical-names
+foggy-runtime query explain FactSalesQueryModel --payload query.json --include-sql
 foggy-runtime compose validate --script compose.fsscript
 foggy-runtime compose preview --script compose.fsscript
 foggy-runtime compose execute --script compose.fsscript
@@ -216,8 +248,8 @@ foggy-runtime fsscript run --script workflow.fsscript
 foggy-runtime fsscript run --script workflow.fsscript --enable-cte-bridge
 foggy-runtime tables inspect --table sale_order --schema public --include-indexes
 foggy-runtime demo sales-drop plan --repo-root D:\foggy-projects\foggy-data-mcp --port 18066
-foggy-runtime demo sales-drop plan --repo-root D:\foggy-projects\foggy-data-mcp --skill-dir D:\demo\skills\foggy-ai-analysis-demo --port 18066
-foggy-runtime --base-url http://127.0.0.1:18066 demo sales-drop replay --skill-dir D:\demo\skills\foggy-ai-analysis-demo --evidence-dir D:\demo\evidence --sqlite-path D:\demo\runtime\sales_drop_demo.sqlite --use-default-datasource
+foggy-runtime demo sales-drop plan --repo-root D:\foggy-projects\foggy-data-mcp --skill-dir D:\demo\skills\foggy-ai-analysis --port 18066
+foggy-runtime --base-url http://127.0.0.1:18066 demo sales-drop replay --skill-dir D:\demo\skills\foggy-ai-analysis --evidence-dir D:\demo\evidence --sqlite-path D:\demo\runtime\sales_drop_demo.sqlite --use-default-datasource
 ```
 
 Query payload compatibility:
@@ -239,15 +271,9 @@ The CLI is backend-neutral and does not select Java or Python. `--base-url` alwa
 
 When the connected Runtime API reports `securityMode=auth-code`, pass the shared runtime code with global `--auth-code <code>` or `FOGGY_RUNTIME_API_AUTH_CODE`. The CLI sends it as `X-Foggy-Runtime-Code`, which is required for protected management operations such as bundle add/update/remove, datasource add/test/bind, resources save, models validate, and models refresh. Runtimes using `none-dev-test-only` do not require this option.
 
-Data-plane model permissions use a separate optional credential. Pass the complete
-opaque header value with global `--authorization <value>` or
-`FOGGY_RUNTIME_AUTHORIZATION`; the CLI sends it unchanged as `Authorization` and
-does not add a `Bearer` prefix. It is sent only to model list/describe, query,
-Compose, and dimension-member paths. It is not sent to management operations or
-the full `fsscript run` evaluator. Both options may be supplied together, but
-`--auth-code` never grants model data access and `--authorization` never grants
-management access. Cross-origin redirects do not forward Authorization, and the
-value is redacted if an upstream response echoes it.
+Data-plane model permissions use a separate optional credential. Pass the complete opaque header value with global `--authorization <value>` or `FOGGY_RUNTIME_AUTHORIZATION`; the CLI sends it unchanged as `Authorization` only to model list/describe, query, Compose, and dimension-member paths. Cross-origin redirects do not forward it, and echoed values are redacted from responses and transport errors.
+
+`query explain` is an evidence-only command for requests that explicitly ask how a result was produced, how a field or metric maps from QM to TM/physical SQL, or how permissions and pre-aggregation affect a query. Omit `--payload` for `DEFINITION`; provide a semantic query payload for `RECOMPILED`. It does not return business result rows and must not replace ordinary queries, model discovery, or semantic loading.
 
 Use `wait-ready` after starting a local dev/test runtime. It polls `GET /api/v1/capabilities` until the Runtime API is reachable and returns success; transient transport failures are retained in JSON `data.attempts`.
 
@@ -274,9 +300,7 @@ Automation and Skills should keep using JSON output so they can validate the ful
 
 `bundles update` sends `watch` only when `--watch` or `--no-watch` is provided, so an update that changes only the path does not accidentally change the runtime watch setting. `bundles remove` maps to `DELETE /api/v1/bundles/{name}` without a request body.
 
-`datasources binding --namespace <namespace>` reads the namespace datasource binding with `GET /api/v1/namespaces/{namespace}/datasource`; `datasources bind` updates it with `PUT`.
-
-`datasources diagnostics` calls `GET /api/v1/datasources` and is intended as the human/debug view for Runtime API-managed datasource state. Newer runtimes include a `pool` object per datasource with lifecycle status, active connection count, last borrow/return timestamps, and pool settings; older runtimes still work when they support `datasources.list`.
+`datasources binding --namespace <namespace>` reads the namespace datasource binding with `GET /api/v1/namespaces/{namespace}/datasource`; `datasources bind` updates it with `PUT`. `datasources diagnostics` calls `GET /api/v1/datasources/diagnostics` and is the preferred evidence command for managed datasource registry path, namespace bindings, persisted records, and pool lifecycle state when the runtime supports `datasources.diagnostics`.
 
 `tables inspect` sends `includeForeignKeys` only when `--include-foreign-keys` or `--no-foreign-keys` is explicitly provided. Use `--include-indexes` when index metadata is needed.
 
@@ -292,18 +316,18 @@ When validating copied fixtures, confirm the runtime datasource first. For the J
 
 ## Local Demo Planning
 
-Before starting the full local demo replay, run the preflight:
+Before starting the full local demo replay, run the CLI plan helper:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File foggy-runtime-cli\scripts\verify-foggy-ai-analysis-demo.ps1 `
-  -RepoRoot D:\foggy-projects\foggy-data-mcp `
-  -Port 18066 `
-  -Namespace salesdrop
+foggy-runtime demo sales-drop plan `
+  --repo-root D:\foggy-projects\foggy-data-mcp `
+  --port 18066 `
+  --namespace salesdrop
 ```
 
-The preflight checks Java/Python availability, source-layout CLI import, bundled Skill assets, optional Skill validation, launcher JAR presence, port availability, and the local sales-drop command plan. It does not start Java.
+The plan helper verifies the bundled sales-drop Skill assets and emits the local command plan. It does not start Java.
 
-`demo sales-drop plan` is a local planning helper for the `foggy-ai-analysis-demo` skill. It does not call Runtime API endpoints or Java/Python private routes. It verifies that the bundled sales-drop skill assets exist, then emits a JSON command plan for:
+`demo sales-drop plan` is a local planning helper for the `foggy-ai-analysis` Skill. It does not call Runtime API endpoints or Java/Python private routes. It verifies that the bundled sales-drop Skill assets exist, then emits a JSON command plan for:
 
 - SQLite schema/data seeding.
 - Java lite runtime startup.
@@ -318,7 +342,7 @@ The preflight checks Java/Python availability, source-layout CLI import, bundled
 
 If the launcher JAR is missing, the command still returns a plan with a warning so a clean workspace can tell the user to build `foggy-mcp-launcher` or pass `--launcher-jar`.
 
-Use `--skill-dir` when the Skill was downloaded from a release zip and unpacked outside the workspace `.codex\skills` directory. The plan output includes both `skillDir` and `demoDir` so automation can verify which asset copy is being used.
+By default, the helper looks under `~/.agents/skills/foggy-ai-analysis`, then workspace development copies. Use `--skill-dir` when the Skill was unpacked outside those locations. The plan output includes both `skillDir` and `demoDir` so automation can verify which asset copy is being used.
 
 ## No-Workspace Sales-Drop Replay
 
@@ -327,7 +351,7 @@ Use `--skill-dir` when the Skill was downloaded from a release zip and unpacked 
 Inputs:
 
 - A running Java lite Runtime API, usually `http://127.0.0.1:18066`.
-- An unpacked `foggy-ai-analysis-demo` Skill directory from the release zip.
+- An installed or unpacked `foggy-ai-analysis` Skill directory from the release zip.
 - The same SQLite file path used by the running runtime default datasource when `--use-default-datasource` is set.
 - Optional `--evidence-dir`; otherwise evidence is written under `.foggy-demo/sales-drop-replay-<stamp>`.
 
@@ -335,16 +359,16 @@ Example:
 
 ```powershell
 foggy-runtime --base-url http://127.0.0.1:18066 demo sales-drop replay `
-  --skill-dir D:\demo\skills\foggy-ai-analysis-demo `
+  --skill-dir D:\demo\skills\foggy-ai-analysis `
   --evidence-dir D:\demo\evidence\sales-drop-replay `
   --sqlite-path D:\demo\runtime\sales_drop_demo.sqlite `
   --use-default-datasource
 ```
 
-With current Java runtimes, use `--use-default-datasource` and start Java with the same SQLite file:
+For the public sales-drop replay, use `--use-default-datasource` and start Java with the same SQLite file:
 
 ```powershell
-java -Dfile.encoding=UTF-8 -jar foggy-runtime-launcher-0.1.3.jar `
+java -Dfile.encoding=UTF-8 -jar foggy-runtime-launcher-0.1.17.jar `
   --server.port=18066 `
   --spring.profiles.active=lite `
   --foggy.runtime-api.enabled=true `
@@ -353,7 +377,7 @@ java -Dfile.encoding=UTF-8 -jar foggy-runtime-launcher-0.1.3.jar `
 
 This mode seeds the bundled SQLite fixture into the runtime default datasource, tests that datasource, inspects the table, runs a read-only SQL sample, validates and registers the bundled TM/QM bundle, refreshes and describes `SalesDropDailyQueryModel`, executes the basic query, and replays the bundled question bank.
 
-The command also supports Runtime API-managed datasource registration without `--use-default-datasource`. With newer 9.2.12 Runtime API builds, namespace datasource bindings are consumed by the model/query layer, so Runtime API-managed datasources can support table/SQL exploration and model/query execution. With older released runtimes, keep the default datasource mode for end-to-end sales-drop replay.
+The command also supports Runtime API-managed datasource registration without `--use-default-datasource`. Keep that path for user-owned databases and namespace-bound model/query smoke tests; keep `--use-default-datasource` for the sales-drop replay so demo seeding never writes to a user database.
 
 Evidence files:
 

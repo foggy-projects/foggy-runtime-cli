@@ -48,21 +48,26 @@ jobs:
 
           Assets include the wheel, sdist, install scripts, SHA256SUMS, and release-manifest.json.
 
+          Adds `foggy-runtime query explain` for versioned DEFINITION and RECOMPILED semantic-query evidence, including optional SQL and physical-name disclosure flags. Existing query validate/execute and model commands keep their protocols unchanged.
+
+          Adds an opaque data-plane `--authorization` / `FOGGY_RUNTIME_AUTHORIZATION` option. It is sent only to model/query/member/Compose routes, stripped on cross-origin redirects, and redacted from echoed responses.
+
           Runtime APIs using securityMode=auth-code require the shared runtime code for protected management operations. Pass it with global --auth-code or FOGGY_RUNTIME_API_AUTH_CODE; the CLI sends X-Foggy-Runtime-Code.
 
-          Public Foggy AI analysis demo onboarding uses three release inputs:
+          Public Foggy AI analysis onboarding uses three release inputs:
 
           1. Install this CLI release.
-          2. Download the foggy-ai-analysis-demo Skill companion assets from this release when present.
-          3. Download Java Runtime API launcher runtime-api-launcher-v0.1.1 from https://github.com/foggy-projects/foggy-data-mcp-bridge/releases/tag/runtime-api-launcher-v0.1.1.
+          2. Download foggy-ai-analysis Skill v0.1.16 from https://github.com/foggy-projects/foggy-ai-analysis/releases/tag/v0.1.16.
+          3. Download Foggy Runtime Launcher foggy-runtime-launcher-v0.1.17 from https://github.com/foggy-projects/foggy-data-mcp-bridge/releases/tag/foggy-runtime-launcher-v0.1.17.
 
           The sales-drop public demo should run with the Java runtime default SQLite datasource and:
 
           \`\`\`powershell
-          foggy-runtime --base-url http://127.0.0.1:18066 demo sales-drop replay --skill-dir <unzipped-skill> --evidence-dir <evidence> --sqlite-path <runtime-default-sqlite> --use-default-datasource
+          foggy-runtime skills install foggy-ai-analysis --zip .\foggy-ai-analysis-skill-0.1.16.zip --replace
+          foggy-runtime --base-url http://127.0.0.1:18066 demo sales-drop replay --evidence-dir <evidence> --sqlite-path <runtime-default-sqlite> --use-default-datasource
           \`\`\`
 
-          Runtime API launcher releases are dev/test-only. Production permission, auth, RBAC, audit, and governance remain a later phase.
+          Foggy Runtime Launcher releases are dev/test-only. Production permission, auth, RBAC, audit, and governance remain a later phase.
           EOF
           gh release create "$tag" \
             dist/*.whl \

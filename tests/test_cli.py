@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import io
+import hashlib
 import json
 import os
+import shutil
 import tempfile
 import unittest
+import zipfile
 from pathlib import Path
 from typing import Any
 from unittest.mock import patch
@@ -16,6 +19,7 @@ from foggy_runtime_cli.main import (
     EXIT_OK,
     EXIT_TRANSPORT_ERROR,
     EXIT_UNSUPPORTED,
+    build_parser,
     console_main,
     demo_available_query_fields,
     main,
@@ -99,6 +103,61 @@ class CliTest(unittest.TestCase):
     def supported_capabilities_response(cls, *capabilities: str) -> dict[str, Any]:
         return cls.capability_response({capability: "supported" for capability in capabilities})
 
+    @staticmethod
+    def write_minimal_sales_drop_assets(skill_dir: Path) -> Path:
+        demo_dir = skill_dir / "assets" / "sales-drop-demo"
+        (demo_dir / "models").mkdir(parents=True)
+        (demo_dir / "queries").mkdir()
+        (demo_dir / "schema.sql").write_text("create table sales_drop_daily(id integer);", encoding="utf-8")
+        (demo_dir / "data.sql").write_text("insert into sales_drop_daily values (1);", encoding="utf-8")
+        (demo_dir / "queries" / "basic.json").write_text(json.dumps({"limit": 1}), encoding="utf-8")
+        return demo_dir
+
+    @staticmethod
+    def write_minimal_skill_zip(zip_path: Path, skill_name: str) -> str:
+        with zipfile.ZipFile(zip_path, "w") as archive:
+            archive.writestr(f"{skill_name}/SKILL.md", f"---\nname: {skill_name}\n---\n")
+            archive.writestr(f"{skill_name}/references/README.md", "content\n")
+        digest = hashlib.sha256()
+        with open(zip_path, "rb") as handle:
+            for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+                digest.update(chunk)
+        return digest.hexdigest()
+
+    @staticmethod
+    def write_stack_manifest(manifest_path: Path, skill_specs: dict[str, dict[str, str]]) -> None:
+        manifest_path.write_text(
+            json.dumps(
+                {
+                    "schemaVersion": "foggy-stack/v1",
+                    "channel": "stable-test",
+                    "components": {
+                        "cli": {
+                            "name": "foggy-runtime-cli",
+                            "recommendedVersion": "9.9.9",
+                            "install": {"windows": "https://example.invalid/install.ps1"},
+                        },
+                        "skills": {
+                            skill: {
+                                "name": skill,
+                                "recommendedVersion": spec["version"],
+                                "tag": f"v{spec['version']}",
+                                "releaseUrl": f"https://example.invalid/{skill}/v{spec['version']}",
+                                "minCliVersion": spec.get("minCliVersion", "0.1.0"),
+                                "zip": {
+                                    "file": spec.get("zipFile", Path(spec["zipPath"]).name),
+                                    "url": Path(spec["zipPath"]).as_uri(),
+                                    "sha256": spec["sha256"],
+                                },
+                            }
+                            for skill, spec in skill_specs.items()
+                        }
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
+
     def test_version_flag_returns_cli_version(self) -> None:
         code, output, error = self.run_cli(["--version"])
 
@@ -127,6 +186,526 @@ class CliTest(unittest.TestCase):
         self.assertEqual(("http://runtime", None, 30.0), FakeClient.init_args)
         self.assertIn('"success": true', output)
         self.assertEqual("", error)
+
+    def test_single_dash_help_alias(self) -> None:
+        for argv in (["-help"], ["skills", "install", "-help"], ["demo", "sales-drop", "-help"]):
+            with self.subTest(argv=argv), patch("sys.stdout", new_callable=io.StringIO) as stdout:
+                with self.assertRaises(SystemExit) as exit_context:
+                    build_parser().parse_args(argv)
+
+            self.assertEqual(0, exit_context.exception.code)
+            self.assertIn("usage: foggy-runtime", stdout.getvalue())
+
+    def test_help_mentions_analysis_skill_and_demo_assets(self) -> None:
+        cases = [
+            (["-help"], ["skills install foggy-ai-analysis", "stack show", "demo sales-drop"]),
+            (["skills", "install", "-help"], ["sales-drop demo assets", "foggy-analysis-suite"]),
+            (
+                ["demo", "sales-drop", "-help"],
+                [
+                    "foggy-runtime skills install foggy-ai-analysis --zip foggy-ai-analysis-skill-0.1.16.zip --replace",
+                    "~/.agents/skills/foggy-ai-analysis",
+                ],
+            ),
+            (["demo", "sales-drop", "replay", "-help"], ["~/.agents/skills/foggy-ai-analysis"]),
+        ]
+        for argv, expected_parts in cases:
+            with self.subTest(argv=argv), patch("sys.stdout", new_callable=io.StringIO) as stdout:
+                with self.assertRaises(SystemExit) as exit_context:
+                    build_parser().parse_args(argv)
+
+            help_text = stdout.getvalue()
+            self.assertEqual(0, exit_context.exception.code)
+            for expected in expected_parts:
+                self.assertIn(expected, help_text)
+
+    def test_skills_install_uses_agents_skills_only(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            home = root / "home"
+            source = root / "source" / "foggy-ai-analysis"
+            (source / "references").mkdir(parents=True)
+            (source / "SKILL.md").write_text("---\nname: foggy-ai-analysis\n---\n", encoding="utf-8")
+            (source / "references" / "public-onboarding.md").write_text("content\n", encoding="utf-8")
+
+            with patch("foggy_runtime_cli.main.Path.home", return_value=home):
+                code, output, error = self.run_cli(
+                    ["skills", "install", "foggy-ai-analysis", "--source-dir", str(source)]
+                )
+
+            body = json.loads(output)
+            target_dir = home / ".agents" / "skills" / "foggy-ai-analysis"
+            self.assertEqual(EXIT_OK, code)
+            self.assertEqual("", error)
+            self.assertTrue((target_dir / "SKILL.md").is_file())
+            self.assertTrue((target_dir / "references" / "public-onboarding.md").is_file())
+            self.assertFalse((home / ".codex" / "skills" / "foggy-ai-analysis").exists())
+            self.assertFalse((home / ".claude" / "skills" / "foggy-ai-analysis").exists())
+            self.assertEqual(str(home / ".agents" / "skills"), body["data"]["targetRoot"])
+            self.assertEqual("agents-skills-only", body["data"]["installPolicy"])
+            self.assertEqual(str(target_dir / "assets" / "sales-drop-demo"), body["data"]["salesDropDemoDir"])
+            self.assertIn("--zip foggy-ai-analysis-skill-0.1.16.zip", body["data"]["demoInstallCommand"])
+            self.assertIn("foggy-ai-analysis/releases/download/v0.1.16", body["data"]["publicZipUrl"])
+            self.assertIn("--workspace-root <workspace-root>", body["data"]["workspaceInstallCommand"])
+
+    def test_stack_show_offline_returns_builtin_fallback(self) -> None:
+        code, output, error = self.run_cli(["stack", "show", "--offline-stack"])
+
+        body = json.loads(output)
+        self.assertEqual(EXIT_OK, code)
+        self.assertEqual("", error)
+        self.assertEqual("builtin:fallback", body["data"]["stackManifestSource"])
+        self.assertEqual("0.1.16", body["data"]["stack"]["components"]["skills"]["foggy-ai-analysis"]["recommendedVersion"])
+        self.assertEqual(
+            "foggy-runtime-launcher-v0.1.17",
+            body["data"]["stack"]["components"]["launcher"]["recommendedTag"],
+        )
+        self.assertIn("startPowerShell", body["data"]["stack"]["components"]["launcher"]["assets"])
+        self.assertIn("sha256", body["data"]["stack"]["components"]["launcher"]["assets"]["startShell"])
+
+    def test_stack_show_default_manifest_failure_falls_back_with_warning(self) -> None:
+        with patch("foggy_runtime_cli.main.read_text_resource", side_effect=OSError("offline")):
+            code, output, error = self.run_cli(["stack", "show"])
+
+        body = json.loads(output)
+        self.assertEqual(EXIT_OK, code)
+        self.assertEqual("", error)
+        self.assertEqual("builtin:fallback", body["data"]["stackManifestSource"])
+        self.assertIn("using CLI built-in fallback", body["data"]["stackManifestWarnings"][0])
+
+    def test_skills_install_default_manifest_failure_fails_closed(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            home = Path(temp_dir) / "home"
+            with (
+                patch("foggy_runtime_cli.main.Path.home", return_value=home),
+                patch("foggy_runtime_cli.main.read_text_resource", side_effect=OSError("offline")),
+            ):
+                code, output, error = self.run_cli(["skills", "install", "foggy-ai-analysis", "--replace"])
+
+            body = json.loads(output)
+            self.assertEqual(EXIT_API_ERROR, code)
+            self.assertEqual("", error)
+            self.assertFalse(body["success"])
+            self.assertIn("Cannot load stack manifest", body["error"]["message"])
+            self.assertFalse((home / ".agents" / "skills" / "foggy-ai-analysis").exists())
+
+    def test_skills_install_downloads_release_zip_from_stack_manifest(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            home = root / "home"
+            zip_path = root / "foggy-ai-analysis-skill-9.9.9.zip"
+            sha256 = self.write_minimal_skill_zip(zip_path, "foggy-ai-analysis")
+            manifest_path = root / "stable.json"
+            self.write_stack_manifest(
+                manifest_path,
+                {
+                    "foggy-ai-analysis": {
+                        "version": "9.9.9",
+                        "zipPath": str(zip_path),
+                        "sha256": sha256,
+                    }
+                },
+            )
+
+            with patch("foggy_runtime_cli.main.Path.home", return_value=home):
+                code, output, error = self.run_cli(
+                    [
+                        "skills",
+                        "install",
+                        "foggy-ai-analysis",
+                        "--stack-manifest",
+                        str(manifest_path),
+                    ]
+                )
+
+            body = json.loads(output)
+            target_dir = home / ".agents" / "skills" / "foggy-ai-analysis"
+            self.assertEqual(EXIT_OK, code)
+            self.assertEqual("", error)
+            self.assertTrue((target_dir / "SKILL.md").is_file())
+            self.assertEqual("release-zip", body["data"]["sourceKind"])
+            self.assertEqual("9.9.9", body["data"]["releaseVersion"])
+            self.assertEqual(sha256, body["data"]["releaseZipSha256"])
+            self.assertTrue(body["data"]["releaseZipSha256Verified"])
+            self.assertEqual(str(manifest_path), body["data"]["stackManifestSource"])
+            self.assertIn("foggy-ai-analysis-skill-9.9.9.zip", body["data"]["publicZipUrl"])
+            self.assertIn("--zip foggy-ai-analysis-skill-9.9.9.zip", body["data"]["demoInstallCommand"])
+
+    def test_skills_install_explicit_zip_uses_zip_version_for_hints(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            home = root / "home"
+            zip_path = root / "foggy-ai-analysis-skill-9.9.9.zip"
+            self.write_minimal_skill_zip(zip_path, "foggy-ai-analysis")
+
+            with patch("foggy_runtime_cli.main.Path.home", return_value=home):
+                code, output, error = self.run_cli(
+                    [
+                        "skills",
+                        "install",
+                        "foggy-ai-analysis",
+                        "--zip",
+                        str(zip_path),
+                        "--replace",
+                    ]
+                )
+
+            body = json.loads(output)
+            target_dir = home / ".agents" / "skills" / "foggy-ai-analysis"
+            self.assertEqual(EXIT_OK, code)
+            self.assertEqual("", error)
+            self.assertTrue((target_dir / "SKILL.md").is_file())
+            self.assertEqual("explicit-zip", body["data"]["sourceKind"])
+            self.assertEqual("9.9.9", body["data"]["releaseVersion"])
+            self.assertIn("foggy-ai-analysis/releases/download/v9.9.9", body["data"]["publicZipUrl"])
+            self.assertIn("--zip foggy-ai-analysis-skill-9.9.9.zip", body["data"]["demoInstallCommand"])
+            self.assertIn("--zip foggy-ai-analysis-skill-9.9.9.zip", body["data"]["zipInstallCommand"])
+
+    def test_skills_install_explicit_zip_with_unknown_version_omits_versioned_hints(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            home = root / "home"
+            zip_path = root / "custom-analysis.zip"
+            self.write_minimal_skill_zip(zip_path, "foggy-ai-analysis")
+
+            with patch("foggy_runtime_cli.main.Path.home", return_value=home):
+                code, output, error = self.run_cli(
+                    [
+                        "skills",
+                        "install",
+                        "foggy-ai-analysis",
+                        "--zip",
+                        str(zip_path),
+                        "--replace",
+                    ]
+                )
+
+            body = json.loads(output)
+            self.assertEqual(EXIT_OK, code)
+            self.assertEqual("", error)
+            self.assertEqual("explicit-zip", body["data"]["sourceKind"])
+            self.assertNotIn("releaseVersion", body["data"])
+            self.assertNotIn("publicZipUrl", body["data"])
+            self.assertNotIn("demoInstallCommand", body["data"])
+            self.assertNotIn("zipInstallCommand", body["data"])
+
+    def test_skills_install_rejects_min_cli_version(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            home = root / "home"
+            zip_path = root / "foggy-ai-analysis-skill-9.9.9.zip"
+            sha256 = self.write_minimal_skill_zip(zip_path, "foggy-ai-analysis")
+            manifest_path = root / "stable.json"
+            self.write_stack_manifest(
+                manifest_path,
+                {
+                    "foggy-ai-analysis": {
+                        "version": "9.9.9",
+                        "zipPath": str(zip_path),
+                        "sha256": sha256,
+                        "minCliVersion": "99.0.0",
+                    }
+                },
+            )
+
+            with patch("foggy_runtime_cli.main.Path.home", return_value=home):
+                code, output, error = self.run_cli(
+                    ["skills", "install", "foggy-ai-analysis", "--stack-manifest", str(manifest_path)]
+                )
+
+            body = json.loads(output)
+            self.assertEqual(EXIT_API_ERROR, code)
+            self.assertEqual("", error)
+            self.assertFalse(body["success"])
+            self.assertIn("requires foggy-runtime-cli >= 99.0.0", body["error"]["message"])
+            self.assertFalse((home / ".agents" / "skills" / "foggy-ai-analysis").exists())
+
+    def test_skills_install_rejects_release_zip_file_path(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            home = root / "home"
+            zip_path = root / "foggy-ai-analysis-skill-9.9.9.zip"
+            sha256 = self.write_minimal_skill_zip(zip_path, "foggy-ai-analysis")
+            manifest_path = root / "stable.json"
+            self.write_stack_manifest(
+                manifest_path,
+                {
+                    "foggy-ai-analysis": {
+                        "version": "9.9.9",
+                        "zipPath": str(zip_path),
+                        "zipFile": "../foggy-ai-analysis-skill-9.9.9.zip",
+                        "sha256": sha256,
+                    }
+                },
+            )
+
+            with patch("foggy_runtime_cli.main.Path.home", return_value=home):
+                code, output, error = self.run_cli(
+                    ["skills", "install", "foggy-ai-analysis", "--stack-manifest", str(manifest_path)]
+                )
+
+            body = json.loads(output)
+            self.assertEqual(EXIT_API_ERROR, code)
+            self.assertEqual("", error)
+            self.assertFalse(body["success"])
+            self.assertIn("Invalid Skill zip file name", body["error"]["message"])
+            self.assertFalse((home / ".agents" / "skills" / "foggy-ai-analysis").exists())
+
+    def test_skills_install_rejects_release_zip_checksum_mismatch(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            home = root / "home"
+            zip_path = root / "foggy-ai-analysis-skill-9.9.9.zip"
+            self.write_minimal_skill_zip(zip_path, "foggy-ai-analysis")
+            manifest_path = root / "stable.json"
+            self.write_stack_manifest(
+                manifest_path,
+                {
+                    "foggy-ai-analysis": {
+                        "version": "9.9.9",
+                        "zipPath": str(zip_path),
+                        "sha256": "0" * 64,
+                    }
+                },
+            )
+
+            with patch("foggy_runtime_cli.main.Path.home", return_value=home):
+                code, output, error = self.run_cli(
+                    [
+                        "skills",
+                        "install",
+                        "foggy-ai-analysis",
+                        "--stack-manifest",
+                        str(manifest_path),
+                    ]
+                )
+
+            body = json.loads(output)
+            target_dir = home / ".agents" / "skills" / "foggy-ai-analysis"
+            self.assertEqual(EXIT_API_ERROR, code)
+            self.assertEqual("", error)
+            self.assertFalse(body["success"])
+            self.assertEqual("SKILL_INSTALL_FAILED", body["error"]["code"])
+            self.assertIn("checksum mismatch", body["error"]["message"])
+            self.assertFalse(target_dir.exists())
+
+    def test_skills_install_suite_downloads_release_zips_from_stack_manifest(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            home = root / "home"
+            analysis_zip = root / "foggy-ai-analysis-skill-9.9.9.zip"
+            semantic_zip = root / "foggy-semantic-query-skill-9.9.9.zip"
+            analysis_sha = self.write_minimal_skill_zip(analysis_zip, "foggy-ai-analysis")
+            semantic_sha = self.write_minimal_skill_zip(semantic_zip, "foggy-semantic-query")
+            manifest_path = root / "stable.json"
+            self.write_stack_manifest(
+                manifest_path,
+                {
+                    "foggy-ai-analysis": {
+                        "version": "9.9.9",
+                        "zipPath": str(analysis_zip),
+                        "sha256": analysis_sha,
+                    },
+                    "foggy-semantic-query": {
+                        "version": "9.9.9",
+                        "zipPath": str(semantic_zip),
+                        "sha256": semantic_sha,
+                    },
+                },
+            )
+
+            with patch("foggy_runtime_cli.main.Path.home", return_value=home):
+                code, output, error = self.run_cli(
+                    [
+                        "skills",
+                        "install",
+                        "foggy-analysis-suite",
+                        "--stack-manifest",
+                        str(manifest_path),
+                    ]
+                )
+
+            body = json.loads(output)
+            target_root = home / ".agents" / "skills"
+            self.assertEqual(EXIT_OK, code)
+            self.assertEqual("", error)
+            self.assertTrue((target_root / "foggy-ai-analysis" / "SKILL.md").is_file())
+            self.assertTrue((target_root / "foggy-semantic-query" / "SKILL.md").is_file())
+            self.assertEqual("release-stack", body["data"]["sourceKind"])
+            self.assertEqual(["foggy-ai-analysis", "foggy-semantic-query"], [item["skill"] for item in body["data"]["installedSkills"]])
+            self.assertTrue(all(item["sourceKind"] == "release-zip" for item in body["data"]["installedSkills"]))
+
+    def test_skills_install_suite_does_not_partially_replace_on_second_failure(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            home = root / "home"
+            target_root = home / ".agents" / "skills"
+            analysis_target = target_root / "foggy-ai-analysis"
+            semantic_target = target_root / "foggy-semantic-query"
+            analysis_target.mkdir(parents=True)
+            semantic_target.mkdir(parents=True)
+            (analysis_target / "SKILL.md").write_text("existing analysis\n", encoding="utf-8")
+            (semantic_target / "SKILL.md").write_text("existing semantic\n", encoding="utf-8")
+
+            analysis_zip = root / "foggy-ai-analysis-skill-9.9.9.zip"
+            semantic_zip = root / "foggy-semantic-query-skill-9.9.9.zip"
+            analysis_sha = self.write_minimal_skill_zip(analysis_zip, "foggy-ai-analysis")
+            self.write_minimal_skill_zip(semantic_zip, "foggy-semantic-query")
+            manifest_path = root / "stable.json"
+            self.write_stack_manifest(
+                manifest_path,
+                {
+                    "foggy-ai-analysis": {
+                        "version": "9.9.9",
+                        "zipPath": str(analysis_zip),
+                        "sha256": analysis_sha,
+                    },
+                    "foggy-semantic-query": {
+                        "version": "9.9.9",
+                        "zipPath": str(semantic_zip),
+                        "sha256": "0" * 64,
+                    },
+                },
+            )
+
+            with patch("foggy_runtime_cli.main.Path.home", return_value=home):
+                code, output, error = self.run_cli(
+                    [
+                        "skills",
+                        "install",
+                        "foggy-analysis-suite",
+                        "--stack-manifest",
+                        str(manifest_path),
+                        "--replace",
+                    ]
+                )
+
+            body = json.loads(output)
+            self.assertEqual(EXIT_API_ERROR, code)
+            self.assertEqual("", error)
+            self.assertFalse(body["success"])
+            self.assertIn("checksum mismatch", body["error"]["message"])
+            self.assertEqual("existing analysis\n", (analysis_target / "SKILL.md").read_text(encoding="utf-8"))
+            self.assertEqual("existing semantic\n", (semantic_target / "SKILL.md").read_text(encoding="utf-8"))
+
+    def test_skills_install_suite_cleans_partial_target_on_copy_failure(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            home = root / "home"
+            workspace = root / "workspace"
+            ai_source = workspace / "foggy-ai-analysis" / "locales" / "en"
+            semantic_source = workspace / ".codex" / "skills" / "foggy-semantic-query"
+            ai_source.mkdir(parents=True)
+            semantic_source.mkdir(parents=True)
+            (ai_source / "SKILL.md").write_text("---\nname: foggy-ai-analysis\n---\n", encoding="utf-8")
+            (semantic_source / "SKILL.md").write_text("---\nname: foggy-semantic-query\n---\n", encoding="utf-8")
+
+            real_copytree = shutil.copytree
+
+            def flaky_copytree(src: Path, dst: Path, **kwargs: Any) -> str:
+                target = Path(dst)
+                if target.name == "foggy-semantic-query":
+                    target.mkdir(parents=True, exist_ok=True)
+                    (target / "partial.txt").write_text("partial\n", encoding="utf-8")
+                    raise OSError("copy failed")
+                return real_copytree(src, dst, **kwargs)
+
+            with (
+                patch("foggy_runtime_cli.main.Path.home", return_value=home),
+                patch("foggy_runtime_cli.main.shutil.copytree", side_effect=flaky_copytree),
+            ):
+                code, output, error = self.run_cli(
+                    ["skills", "install", "foggy-analysis-suite", "--workspace-root", str(workspace)]
+                )
+
+            body = json.loads(output)
+            target_root = home / ".agents" / "skills"
+            self.assertEqual(EXIT_API_ERROR, code)
+            self.assertEqual("", error)
+            self.assertFalse(body["success"])
+            self.assertIn("copy failed", body["error"]["message"])
+            self.assertFalse((target_root / "foggy-ai-analysis").exists())
+            self.assertFalse((target_root / "foggy-semantic-query").exists())
+
+    def test_skills_install_existing_requires_replace(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            home = root / "home"
+            source = root / "source" / "foggy-ai-analysis"
+            source.mkdir(parents=True)
+            (source / "SKILL.md").write_text("---\nname: foggy-ai-analysis\n---\n", encoding="utf-8")
+            target = home / ".agents" / "skills" / "foggy-ai-analysis"
+            target.mkdir(parents=True)
+            (target / "SKILL.md").write_text("existing\n", encoding="utf-8")
+
+            with patch("foggy_runtime_cli.main.Path.home", return_value=home):
+                code, output, error = self.run_cli(
+                    ["skills", "install", "foggy-ai-analysis", "--source-dir", str(source)]
+                )
+
+            body = json.loads(output)
+            self.assertEqual(EXIT_API_ERROR, code)
+            self.assertEqual("", error)
+            self.assertFalse(body["success"])
+            self.assertEqual("existing\n", (target / "SKILL.md").read_text(encoding="utf-8"))
+
+    def test_skills_install_semantic_query_from_workspace_root(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            home = root / "home"
+            workspace = root / "workspace"
+            source = workspace / ".codex" / "skills" / "foggy-semantic-query"
+            (source / "references").mkdir(parents=True)
+            (source / "SKILL.md").write_text("---\nname: foggy-semantic-query\n---\n", encoding="utf-8")
+            (source / "references" / "query-model-dsl.md").write_text("content\n", encoding="utf-8")
+
+            with patch("foggy_runtime_cli.main.Path.home", return_value=home):
+                code, output, error = self.run_cli(
+                    ["skills", "install", "foggy-semantic-query", "--workspace-root", str(workspace)]
+                )
+
+            body = json.loads(output)
+            target_dir = home / ".agents" / "skills" / "foggy-semantic-query"
+            self.assertEqual(EXIT_OK, code)
+            self.assertEqual("", error)
+            self.assertTrue((target_dir / "SKILL.md").is_file())
+            self.assertTrue((target_dir / "references" / "query-model-dsl.md").is_file())
+            self.assertFalse((home / ".codex" / "skills" / "foggy-semantic-query").exists())
+            self.assertFalse((home / ".claude" / "skills" / "foggy-semantic-query").exists())
+            self.assertEqual("agents-skills-only", body["data"]["installPolicy"])
+
+    def test_skills_install_suite_from_workspace_root(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            home = root / "home"
+            workspace = root / "workspace"
+            ai_source = workspace / "foggy-ai-analysis" / "locales" / "en"
+            semantic_source = workspace / ".codex" / "skills" / "foggy-semantic-query"
+            ai_source.mkdir(parents=True)
+            semantic_source.mkdir(parents=True)
+            (ai_source / "SKILL.md").write_text("---\nname: foggy-ai-analysis\n---\n", encoding="utf-8")
+            (semantic_source / "SKILL.md").write_text("---\nname: foggy-semantic-query\n---\n", encoding="utf-8")
+
+            with patch("foggy_runtime_cli.main.Path.home", return_value=home):
+                code, output, error = self.run_cli(
+                    ["skills", "install", "foggy-analysis-suite", "--workspace-root", str(workspace)]
+                )
+
+            body = json.loads(output)
+            target_root = home / ".agents" / "skills"
+            self.assertEqual(EXIT_OK, code)
+            self.assertEqual("", error)
+            self.assertTrue((target_root / "foggy-ai-analysis" / "SKILL.md").is_file())
+            self.assertTrue((target_root / "foggy-semantic-query" / "SKILL.md").is_file())
+            self.assertFalse((home / ".codex" / "skills" / "foggy-ai-analysis").exists())
+            self.assertFalse((home / ".claude" / "skills" / "foggy-semantic-query").exists())
+            self.assertEqual("foggy-analysis-suite", body["data"]["skill"])
+            self.assertEqual(["foggy-ai-analysis", "foggy-semantic-query"], [item["skill"] for item in body["data"]["installedSkills"]])
+            self.assertEqual(
+                str(target_root / "foggy-ai-analysis" / "assets" / "sales-drop-demo"),
+                body["data"]["installedSkills"][0]["salesDropDemoDir"],
+            )
+            self.assertEqual("foggy-ai-analysis", body["data"]["installedSkills"][1]["companionSkill"])
 
     def test_wait_ready_succeeds_after_transport_error(self) -> None:
         from foggy_runtime_cli.client import RuntimeTransportError
@@ -1127,58 +1706,6 @@ class CliTest(unittest.TestCase):
             FakeClient.calls,
         )
 
-    def test_datasources_diagnostics_uses_list_route_and_capability(self) -> None:
-        FakeClient.responses = [
-            self.supported_capabilities_response("datasources.list"),
-            {
-                "success": True,
-                "engine": "java",
-                "data": {
-                    "datasources": [
-                        {
-                            "name": "sales-mysql",
-                            "origin": "runtime-api",
-                            "pool": {
-                                "lifecycleStatus": "open",
-                                "poolExists": True,
-                                "activeConnections": 0,
-                            },
-                        }
-                    ]
-                },
-            },
-        ]
-
-        code, output, error = self.run_cli(["datasources", "diagnostics"])
-
-        payload = json.loads(output)
-        self.assertEqual(EXIT_OK, code)
-        self.assertEqual("", error)
-        self.assertEqual(
-            [
-                ("GET", "/api/v1/capabilities", None),
-                ("GET", "/api/v1/datasources", None),
-            ],
-            FakeClient.calls,
-        )
-        self.assertEqual("open", payload["data"]["datasources"][0]["pool"]["lifecycleStatus"])
-
-    def test_datasources_help_includes_diagnostics(self) -> None:
-        stdout = io.StringIO()
-
-        with patch("sys.stdout", stdout):
-            with self.assertRaises(SystemExit) as raised:
-                main(
-                    ["datasources", "--help"],
-                    stdout=io.StringIO(),
-                    stderr=io.StringIO(),
-                    stdin=io.StringIO(""),
-                    client_factory=FakeClient,
-                )
-
-        self.assertEqual(0, raised.exception.code)
-        self.assertIn("diagnostics", stdout.getvalue())
-
     def test_datasources_add_body(self) -> None:
         FakeClient.responses = [
             {
@@ -1224,6 +1751,57 @@ class CliTest(unittest.TestCase):
             FakeClient.calls,
         )
 
+    def test_datasources_add_mysql_password_env_body(self) -> None:
+        FakeClient.responses = [
+            {
+                "success": True,
+                "engine": "java",
+                "runtimeApiVersion": "foggy-runtime-api/v1",
+                "data": {"capabilities": {"datasources.add": "supported"}},
+            },
+            {"success": True, "engine": "java", "data": {"datasource": {"name": "sales-mysql"}}},
+        ]
+
+        code, _output, error = self.run_cli(
+            [
+                "datasources",
+                "add",
+                "--name",
+                "sales-mysql",
+                "--type",
+                "mysql",
+                "--jdbc-url",
+                "jdbc:mysql://127.0.0.1:13308/foggy_demo?useSSL=false",
+                "--username",
+                "foggy",
+                "--password-env",
+                "FOGGY_MYSQL_PASSWORD",
+                "--replace",
+            ]
+        )
+
+        self.assertEqual(EXIT_OK, code)
+        self.assertEqual("", error)
+        self.assertEqual(
+            [
+                ("GET", "/api/v1/capabilities", None),
+                (
+                    "POST",
+                    "/api/v1/datasources",
+                    {
+                        "name": "sales-mysql",
+                        "type": "mysql",
+                        "jdbcUrl": "jdbc:mysql://127.0.0.1:13308/foggy_demo?useSSL=false",
+                        "username": "foggy",
+                        "passwordRef": "env:FOGGY_MYSQL_PASSWORD",
+                        "replace": True,
+                        "enabled": True,
+                    },
+                ),
+            ],
+            FakeClient.calls,
+        )
+
     def test_datasources_update_path_and_body(self) -> None:
         FakeClient.responses = [
             {
@@ -1256,6 +1834,7 @@ class CliTest(unittest.TestCase):
                     "/api/v1/datasources/sales%20sqlite",
                     {
                         "name": "sales sqlite",
+                        "type": "sqlite",
                         "jdbcUrl": "jdbc:sqlite:./sales-v2.db",
                         "replace": True,
                         "enabled": False,
@@ -1264,81 +1843,6 @@ class CliTest(unittest.TestCase):
             ],
             FakeClient.calls,
         )
-
-    def test_datasources_add_mysql_body_with_password_env(self) -> None:
-        FakeClient.responses = [
-            self.supported_capabilities_response("datasources.add"),
-            {"success": True, "engine": "java", "data": {"datasource": {"name": "sales-mysql"}}},
-        ]
-
-        with patch.dict(os.environ, {"FOGGY_TEST_MYSQL_PASSWORD": "mysql-secret"}, clear=True):
-            code, _output, error = self.run_cli(
-                [
-                    "datasources",
-                    "add",
-                    "--name",
-                    "sales-mysql",
-                    "--type",
-                    "mysql",
-                    "--jdbc-url",
-                    "jdbc:mysql://127.0.0.1:3306/foggy_sales",
-                    "--username",
-                    "foggy",
-                    "--password-env",
-                    "FOGGY_TEST_MYSQL_PASSWORD",
-                    "--replace",
-                ]
-            )
-
-        self.assertEqual(EXIT_OK, code)
-        self.assertEqual("", error)
-        self.assertEqual(
-            [
-                ("GET", "/api/v1/capabilities", None),
-                (
-                    "POST",
-                    "/api/v1/datasources",
-                    {
-                        "name": "sales-mysql",
-                        "type": "mysql",
-                        "jdbcUrl": "jdbc:mysql://127.0.0.1:3306/foggy_sales",
-                        "username": "foggy",
-                        "password": "mysql-secret",
-                        "replace": True,
-                        "enabled": True,
-                    },
-                ),
-            ],
-            FakeClient.calls,
-        )
-
-    def test_datasources_add_password_env_requires_existing_env_var(self) -> None:
-        FakeClient.responses = [
-            self.supported_capabilities_response("datasources.add"),
-        ]
-
-        with patch.dict(os.environ, {}, clear=True):
-            code, output, error = self.run_cli(
-                [
-                    "datasources",
-                    "add",
-                    "--name",
-                    "sales-mysql",
-                    "--type",
-                    "mysql",
-                    "--jdbc-url",
-                    "jdbc:mysql://127.0.0.1:3306/foggy_sales",
-                    "--username",
-                    "foggy",
-                    "--password-env",
-                    "FOGGY_TEST_MYSQL_PASSWORD",
-                ]
-            )
-
-        self.assertEqual(EXIT_CLI_ERROR, code)
-        self.assertEqual("", output)
-        self.assertIn("environment variable is not set: FOGGY_TEST_MYSQL_PASSWORD", error)
-        self.assertEqual([], FakeClient.calls)
 
     def test_datasources_test_path(self) -> None:
         FakeClient.responses = [
@@ -1406,6 +1910,33 @@ class CliTest(unittest.TestCase):
             [
                 ("GET", "/api/v1/capabilities", None),
                 ("GET", "/api/v1/namespaces/dev%20ns/datasource", None),
+            ],
+            FakeClient.calls,
+        )
+
+    def test_datasources_diagnostics_path(self) -> None:
+        FakeClient.responses = [
+            self.supported_capabilities_response("datasources.diagnostics"),
+            {
+                "success": True,
+                "engine": "java",
+                "data": {
+                    "registryPath": "D:/runtime/.foggy-runtime/runtime-datasources.json",
+                    "namespaceBindings": {"dev ns": "sales-sqlite"},
+                    "datasources": [],
+                    "warnings": [],
+                },
+            },
+        ]
+
+        code, _output, error = self.run_cli(["datasources", "diagnostics"])
+
+        self.assertEqual(EXIT_OK, code)
+        self.assertEqual("", error)
+        self.assertEqual(
+            [
+                ("GET", "/api/v1/capabilities", None),
+                ("GET", "/api/v1/datasources/diagnostics", None),
             ],
             FakeClient.calls,
         )
@@ -1548,16 +2079,14 @@ class CliTest(unittest.TestCase):
     def test_demo_sales_drop_plan_is_local(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             repo_root = Path(temp_dir)
-            demo_dir = repo_root / ".codex" / "skills" / "foggy-ai-analysis-demo" / "assets" / "sales-drop-demo"
-            (demo_dir / "models").mkdir(parents=True)
-            (demo_dir / "queries").mkdir()
-            (demo_dir / "schema.sql").write_text("create table sales_drop_daily(id integer);", encoding="utf-8")
-            (demo_dir / "data.sql").write_text("insert into sales_drop_daily values (1);", encoding="utf-8")
-            (demo_dir / "queries" / "basic.json").write_text(json.dumps({"limit": 1}), encoding="utf-8")
+            home = repo_root / "home"
+            skill_dir = repo_root / ".codex" / "skills" / "foggy-ai-analysis"
+            demo_dir = self.write_minimal_sales_drop_assets(skill_dir)
 
-            code, output, error = self.run_cli(
-                ["demo", "sales-drop", "plan", "--repo-root", str(repo_root), "--port", "18066"]
-            )
+            with patch("foggy_runtime_cli.main.Path.home", return_value=home):
+                code, output, error = self.run_cli(
+                    ["demo", "sales-drop", "plan", "--repo-root", str(repo_root), "--port", "18066"]
+                )
 
         payload = json.loads(output)
         self.assertEqual(EXIT_OK, code)
@@ -1568,21 +2097,38 @@ class CliTest(unittest.TestCase):
         self.assertEqual("sales-drop", payload["data"]["demo"])
         self.assertEqual("http://127.0.0.1:18066", payload["data"]["baseUrl"])
         self.assertEqual("default", payload["data"]["namespace"])
-        self.assertEqual(str(demo_dir.parent.parent), payload["data"]["skillDir"])
+        self.assertEqual(str(skill_dir), payload["data"]["skillDir"])
         self.assertEqual(str(demo_dir), payload["data"]["demoDir"])
         self.assertIn("commands", payload["data"])
+
+    def test_demo_sales_drop_plan_prefers_installed_analysis_skill(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            home = root / "home"
+            repo_root = root / "workspace"
+            installed_skill = home / ".agents" / "skills" / "foggy-ai-analysis"
+            workspace_skill = repo_root / ".codex" / "skills" / "foggy-ai-analysis"
+            installed_demo_dir = self.write_minimal_sales_drop_assets(installed_skill)
+            self.write_minimal_sales_drop_assets(workspace_skill)
+
+            with patch("foggy_runtime_cli.main.Path.home", return_value=home):
+                code, output, error = self.run_cli(
+                    ["demo", "sales-drop", "plan", "--repo-root", str(repo_root)]
+                )
+
+        payload = json.loads(output)
+        self.assertEqual(EXIT_OK, code)
+        self.assertEqual("", error)
+        self.assertTrue(payload["success"])
+        self.assertEqual(str(installed_skill), payload["data"]["skillDir"])
+        self.assertEqual(str(installed_demo_dir), payload["data"]["demoDir"])
 
     def test_demo_sales_drop_plan_accepts_unpacked_skill_dir(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             repo_root = root / "workspace"
-            skill_dir = root / "release-skill" / "foggy-ai-analysis-demo"
-            demo_dir = skill_dir / "assets" / "sales-drop-demo"
-            (demo_dir / "models").mkdir(parents=True)
-            (demo_dir / "queries").mkdir()
-            (demo_dir / "schema.sql").write_text("create table sales_drop_daily(id integer);", encoding="utf-8")
-            (demo_dir / "data.sql").write_text("insert into sales_drop_daily values (1);", encoding="utf-8")
-            (demo_dir / "queries" / "basic.json").write_text(json.dumps({"limit": 1}), encoding="utf-8")
+            skill_dir = root / "release-skill" / "foggy-ai-analysis"
+            demo_dir = self.write_minimal_sales_drop_assets(skill_dir)
 
             code, output, error = self.run_cli(
                 [
@@ -1611,7 +2157,9 @@ class CliTest(unittest.TestCase):
 
     def test_demo_sales_drop_plan_reports_missing_assets(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
-            code, output, error = self.run_cli(["demo", "sales-drop", "plan", "--repo-root", temp_dir])
+            home = Path(temp_dir) / "home"
+            with patch("foggy_runtime_cli.main.Path.home", return_value=home):
+                code, output, error = self.run_cli(["demo", "sales-drop", "plan", "--repo-root", temp_dir])
 
         payload = json.loads(output)
         self.assertEqual(EXIT_API_ERROR, code)
@@ -1619,6 +2167,12 @@ class CliTest(unittest.TestCase):
         self.assertEqual([], FakeClient.calls)
         self.assertFalse(payload["success"])
         self.assertEqual("DEMO_ASSET_MISSING", payload["error"]["code"])
+        self.assertEqual(
+            "foggy-runtime skills install foggy-ai-analysis --zip foggy-ai-analysis-skill-0.1.16.zip --replace",
+            payload["data"]["installCommand"],
+        )
+        self.assertIn("foggy-ai-analysis/releases/download/v0.1.16", payload["data"]["publicZipUrl"])
+        self.assertIn("--zip foggy-ai-analysis-skill-0.1.16.zip", payload["error"]["message"])
 
     def test_demo_available_query_fields_supports_date_grains(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -1693,7 +2247,7 @@ class CliTest(unittest.TestCase):
         ]
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
-            skill_dir = root / "foggy-ai-analysis-demo"
+            skill_dir = root / "foggy-ai-analysis"
             demo_dir = skill_dir / "assets" / "sales-drop-demo"
             models_dir = demo_dir / "models"
             (models_dir / "query").mkdir(parents=True)
@@ -1827,7 +2381,7 @@ class CliTest(unittest.TestCase):
         ]
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
-            skill_dir = root / "foggy-ai-analysis-demo"
+            skill_dir = root / "foggy-ai-analysis"
             demo_dir = skill_dir / "assets" / "sales-drop-demo"
             models_dir = demo_dir / "models"
             models_dir.mkdir(parents=True)
@@ -1878,7 +2432,7 @@ class CliTest(unittest.TestCase):
 
     def test_demo_sales_drop_replay_default_datasource_requires_sqlite_path(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
-            skill_dir = Path(temp_dir) / "foggy-ai-analysis-demo"
+            skill_dir = Path(temp_dir) / "foggy-ai-analysis"
             code, output, error = self.run_cli(
                 [
                     "--base-url",
@@ -1897,6 +2451,33 @@ class CliTest(unittest.TestCase):
         self.assertEqual("", error)
         self.assertFalse(payload["success"])
         self.assertEqual("DEMO_SQLITE_PATH_REQUIRED", payload["error"]["code"])
+        self.assertEqual([], FakeClient.calls)
+
+    def test_demo_sales_drop_replay_missing_assets_mentions_install_command(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            home = Path(temp_dir) / "home"
+            with patch("foggy_runtime_cli.main.Path.home", return_value=home):
+                code, output, error = self.run_cli(
+                    [
+                        "--base-url",
+                        "http://runtime:18066",
+                        "demo",
+                        "sales-drop",
+                        "replay",
+                    ]
+                )
+
+        payload = json.loads(output)
+        self.assertEqual(EXIT_API_ERROR, code)
+        self.assertEqual("", error)
+        self.assertFalse(payload["success"])
+        self.assertEqual("DEMO_ASSET_MISSING", payload["error"]["code"])
+        self.assertEqual(
+            "foggy-runtime skills install foggy-ai-analysis --zip foggy-ai-analysis-skill-0.1.16.zip --replace",
+            payload["data"]["installCommand"],
+        )
+        self.assertIn("foggy-ai-analysis/releases/download/v0.1.16", payload["data"]["publicZipUrl"])
+        self.assertIn("--zip foggy-ai-analysis-skill-0.1.16.zip", payload["error"]["message"])
         self.assertEqual([], FakeClient.calls)
 
     def test_compose_validate_reads_script_file_and_checks_capability(self) -> None:
