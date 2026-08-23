@@ -25,10 +25,17 @@ class _OriginSafeRedirectHandler(HTTPRedirectHandler):
         newurl: str,
     ) -> Request | None:
         redirected = super().redirect_request(req, fp, code, msg, headers, newurl)
+        if redirected is not None:
+            # Authorization is scoped to the exact data-plane request selected
+            # before the redirect; never infer scope from a server Location.
+            _remove_header_case_insensitive(redirected, "Authorization")
         if redirected is not None and _origin(req.full_url) != _origin(newurl):
-            redirected.remove_header("Authorization")
-            redirected.remove_header("Cookie")
-            redirected.remove_header("Proxy-Authorization")
+            for header in (
+                "X-Foggy-Runtime-Code",
+                "Cookie",
+                "Proxy-Authorization",
+            ):
+                _remove_header_case_insensitive(redirected, header)
         return redirected
 
 
@@ -64,10 +71,18 @@ class RuntimeApiClient:
             try:
                 decoded = json.loads(payload)
             except json.JSONDecodeError as json_exc:
-                safe_payload = _redact_text(payload, self.authorization)
+                safe_payload = _redact_text(
+                    payload,
+                    self.auth_code,
+                    self.authorization,
+                )
                 raise RuntimeTransportError(f"HTTP {exc.code}: {safe_payload}") from json_exc
             if isinstance(decoded, dict):
-                return _redact_value(decoded, self.authorization)
+                return _redact_value(
+                    decoded,
+                    self.auth_code,
+                    self.authorization,
+                )
             raise RuntimeTransportError(f"HTTP {exc.code}: response is not a JSON object")
         except URLError as exc:
             raise RuntimeTransportError(str(exc.reason)) from exc
@@ -82,7 +97,7 @@ class RuntimeApiClient:
             raise RuntimeTransportError(f"Invalid JSON response from {url}") from exc
         if not isinstance(decoded, dict):
             raise RuntimeTransportError(f"Response from {url} is not a JSON object")
-        return _redact_value(decoded, self.authorization)
+        return _redact_value(decoded, self.auth_code, self.authorization)
 
     def _normalized_base_url(self) -> str:
         return self.base_url.rstrip("/") + "/"
@@ -124,22 +139,30 @@ def _origin(url: str) -> tuple[str, str, int | None]:
     return parsed.scheme.lower(), (parsed.hostname or "").lower(), port
 
 
-def _redact_text(value: str, authorization: str | None) -> str:
-    if not authorization:
-        return value
-    return value.replace(authorization, "[REDACTED]")
+def _remove_header_case_insensitive(request: Request, name: str) -> None:
+    expected = name.lower()
+    for collection in (request.headers, request.unredirected_hdrs):
+        for actual in tuple(collection):
+            if actual.lower() == expected:
+                request.remove_header(actual)
 
 
-def _redact_value(value: Any, authorization: str | None) -> Any:
-    if not authorization:
-        return value
+def _redact_text(value: str, *credentials: str | None) -> str:
+    redacted = value
+    for credential in credentials:
+        if credential:
+            redacted = redacted.replace(credential, "[REDACTED]")
+    return redacted
+
+
+def _redact_value(value: Any, *credentials: str | None) -> Any:
     if isinstance(value, str):
-        return _redact_text(value, authorization)
+        return _redact_text(value, *credentials)
     if isinstance(value, dict):
         return {
-            key: _redact_value(item, authorization)
+            key: _redact_value(item, *credentials)
             for key, item in value.items()
         }
     if isinstance(value, list):
-        return [_redact_value(item, authorization) for item in value]
+        return [_redact_value(item, *credentials) for item in value]
     return value

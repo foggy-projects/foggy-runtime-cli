@@ -12,7 +12,7 @@ from typing import Any
 from unittest.mock import patch
 
 from foggy_runtime_cli.client import RuntimeApiClient
-from foggy_runtime_cli.main import EXIT_OK, EXIT_UNSUPPORTED, main
+from foggy_runtime_cli.main import EXIT_CLI_ERROR, EXIT_OK, EXIT_UNSUPPORTED, main
 
 
 REVISION = "sha256:" + "a" * 64
@@ -143,7 +143,7 @@ class AnalyticsCliContractTest(unittest.TestCase):
                 "http://analytics",
                 "bundles",
                 "validate",
-                "sales/2026",
+                "sales-2026",
                 "--revision",
                 REVISION,
                 "--request-id",
@@ -160,7 +160,7 @@ class AnalyticsCliContractTest(unittest.TestCase):
                 ("GET", "/api/v1/capabilities", None),
                 (
                     "POST",
-                    "/api/v1/bundles/sales%2F2026/validate",
+                    "/api/v1/bundles/sales-2026/validate",
                     {
                         "expectedBundleRevision": REVISION,
                         "requestId": "request-validate",
@@ -185,7 +185,7 @@ class AnalyticsCliContractTest(unittest.TestCase):
                     "analytics",
                     "reports",
                     "preview",
-                    "sales summary",
+                    "sales-summary",
                     "--bundle",
                     "sales",
                     "--revision",
@@ -212,7 +212,7 @@ class AnalyticsCliContractTest(unittest.TestCase):
         method, path, body = FakeClient.calls[1]
         self.assertEqual("POST", method)
         self.assertEqual(
-            "/api/v1/bundles/sales/reports/sales%20summary/preview",
+            "/api/v1/bundles/sales/reports/sales-summary/preview",
             path,
         )
         self.assertEqual(REVISION, body["expectedBundleRevision"])
@@ -223,6 +223,31 @@ class AnalyticsCliContractTest(unittest.TestCase):
         )
         self.assertNotIn("owner", body)
         self.assertNotIn("filters", body)
+
+    def test_analytics_rejects_refs_that_cannot_be_one_route_segment(self) -> None:
+        for command in (
+            ["analytics", "bundles", "validate", ".."],
+            [
+                "analytics",
+                "reports",
+                "preview",
+                "sales/report",
+                "--bundle",
+                "sales",
+                "--revision",
+                REVISION,
+                "--authority-provider",
+                "tms",
+                "--authority-reference",
+                "subject:42",
+            ],
+        ):
+            with self.subTest(command=command):
+                code, output, error = self.run_cli(command)
+                self.assertEqual(EXIT_CLI_ERROR, code)
+                self.assertEqual("", output)
+                self.assertIn("URL-safe segment", error)
+                self.assertEqual([], FakeClient.calls)
 
     def test_dashboard_render_has_independent_capability_and_route(self) -> None:
         FakeClient.responses = [
@@ -299,6 +324,7 @@ class AnalyticsHttpHandler(BaseHTTPRequestHandler):
             {
                 "method": "GET",
                 "path": self.path,
+                "runtime_code": self.headers.get("X-Foggy-Runtime-Code"),
                 "authorization": self.headers.get("Authorization"),
             }
         )
@@ -313,6 +339,7 @@ class AnalyticsHttpHandler(BaseHTTPRequestHandler):
             {
                 "method": "POST",
                 "path": self.path,
+                "runtime_code": self.headers.get("X-Foggy-Runtime-Code"),
                 "authorization": self.headers.get("Authorization"),
                 "body": body,
             }
@@ -345,6 +372,8 @@ class AnalyticsCliFakeHttpTest(unittest.TestCase):
                     "analytics",
                     "--base-url",
                     f"http://127.0.0.1:{server.server_port}/analytics",
+                    "--auth-code",
+                    "analytics-runtime-code",
                     "--authorization",
                     "opaque-authority-header",
                     "reports",
@@ -378,11 +407,13 @@ class AnalyticsCliFakeHttpTest(unittest.TestCase):
                 {
                     "method": "GET",
                     "path": "/analytics/api/v1/capabilities",
+                    "runtime_code": "analytics-runtime-code",
                     "authorization": None,
                 },
                 {
                     "method": "POST",
                     "path": "/analytics/api/v1/bundles/sales/reports/sales-summary/preview",
+                    "runtime_code": "analytics-runtime-code",
                     "authorization": "opaque-authority-header",
                     "body": {
                         "expectedBundleRevision": REVISION,

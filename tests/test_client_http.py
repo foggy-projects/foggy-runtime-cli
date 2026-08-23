@@ -69,6 +69,32 @@ class RedirectingHandler(BaseHTTPRequestHandler):
         return
 
 
+class SameOriginScopeRedirectHandler(BaseHTTPRequestHandler):
+    captured: dict[str, Any] = {}
+
+    def do_POST(self) -> None:
+        self.send_response(302)
+        self.send_header("Location", "/api/v1/capabilities")
+        self.send_header("Content-Length", "0")
+        self.end_headers()
+
+    def do_GET(self) -> None:
+        type(self).captured = {
+            "path": self.path,
+            "runtime_code": self.headers.get("X-Foggy-Runtime-Code"),
+            "authorization": self.headers.get("Authorization"),
+        }
+        payload = json.dumps({"success": True}).encode("utf-8")
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(payload)))
+        self.end_headers()
+        self.wfile.write(payload)
+
+    def log_message(self, _format: str, *_args: Any) -> None:
+        return
+
+
 class RuntimeApiClientHttpTest(unittest.TestCase):
     def setUp(self) -> None:
         CapturingHandler.response_status = 200
@@ -152,7 +178,7 @@ class RuntimeApiClientHttpTest(unittest.TestCase):
                 path,
             )
 
-    def test_cross_origin_redirect_does_not_forward_authorization(self) -> None:
+    def test_cross_origin_redirect_does_not_forward_credentials(self) -> None:
         redirect_server = ThreadingHTTPServer(("127.0.0.1", 0), RedirectingHandler)
         RedirectingHandler.target_url = (
             f"http://localhost:{self.server.server_port}/api/v1/models"
@@ -165,6 +191,7 @@ class RuntimeApiClientHttpTest(unittest.TestCase):
         try:
             client = RuntimeApiClient(
                 f"http://127.0.0.1:{redirect_server.server_port}",
+                auth_code="runtime-secret",
                 authorization="opaque-secret",
                 timeout=5,
             )
@@ -175,26 +202,71 @@ class RuntimeApiClientHttpTest(unittest.TestCase):
             redirect_thread.join(timeout=5)
 
         self.assertTrue(response["success"])
+        self.assertIsNone(CapturingHandler.captured["runtime_code"])
         self.assertIsNone(CapturingHandler.captured["authorization"])
 
-    def test_response_and_http_error_payloads_redact_authorization(self) -> None:
+    def test_same_origin_redirect_does_not_retarget_data_authorization(self) -> None:
+        SameOriginScopeRedirectHandler.captured = {}
+        server = ThreadingHTTPServer(
+            ("127.0.0.1", 0),
+            SameOriginScopeRedirectHandler,
+        )
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            client = RuntimeApiClient(
+                f"http://127.0.0.1:{server.server_port}",
+                auth_code="runtime-secret",
+                authorization="opaque-secret",
+                timeout=5,
+            )
+            response = client.request(
+                "POST",
+                "/api/v1/bundles/sales/reports/sales-summary/preview",
+                {},
+            )
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=5)
+
+        self.assertTrue(response["success"])
+        self.assertEqual(
+            {
+                "path": "/api/v1/capabilities",
+                "runtime_code": "runtime-secret",
+                "authorization": None,
+            },
+            SameOriginScopeRedirectHandler.captured,
+        )
+
+    def test_response_and_http_error_payloads_redact_credentials(self) -> None:
         CapturingHandler.response_body = {
             "success": True,
-            "data": {"echo": "prefix opaque-secret suffix"},
+            "data": {
+                "echo": "prefix runtime-secret opaque-secret suffix",
+            },
         }
         client = RuntimeApiClient(
             self.base_url,
+            auth_code="runtime-secret",
             authorization="opaque-secret",
             timeout=5,
         )
 
         response = client.request("GET", "/api/v1/models")
-        self.assertEqual("prefix [REDACTED] suffix", response["data"]["echo"])
+        self.assertEqual(
+            "prefix [REDACTED] [REDACTED] suffix",
+            response["data"]["echo"],
+        )
 
         CapturingHandler.response_status = 500
-        CapturingHandler.response_payload = b"upstream echoed opaque-secret"
+        CapturingHandler.response_payload = (
+            b"upstream echoed runtime-secret opaque-secret"
+        )
         with self.assertRaises(RuntimeTransportError) as raised:
             client.request("GET", "/api/v1/models")
+        self.assertNotIn("runtime-secret", str(raised.exception))
         self.assertNotIn("opaque-secret", str(raised.exception))
         self.assertIn("[REDACTED]", str(raised.exception))
 

@@ -30,6 +30,7 @@ EXIT_TRANSPORT_ERROR = 4
 
 DEFAULT_BASE_URL = "http://127.0.0.1:8080"
 DEFAULT_ANALYTICS_BASE_URL = "http://127.0.0.1:8080/analytics"
+ANALYTICS_LOGICAL_REF = re.compile(r"[A-Za-z0-9][A-Za-z0-9._~-]{0,127}")
 ANALYSIS_SKILL = "foggy-ai-analysis"
 SEMANTIC_QUERY_SKILL = "foggy-semantic-query"
 LEGACY_ANALYSIS_DEMO_SKILL = "foggy-ai-analysis-demo"
@@ -883,7 +884,8 @@ def add_analytics_transport_arguments(parser: argparse.ArgumentParser) -> None:
         default=argparse.SUPPRESS,
         help=(
             "Analytics API auth code. Overrides "
-            "FOGGY_ANALYTICS_RUNTIME_API_AUTH_CODE."
+            "FOGGY_ANALYTICS_RUNTIME_API_AUTH_CODE and is sent as "
+            "X-Foggy-Runtime-Code."
         ),
     )
     parser.add_argument(
@@ -1062,28 +1064,28 @@ def wait_ready_handler(
 
 
 def build_body(args: argparse.Namespace, stdin: TextIO, stderr: TextIO) -> dict[str, Any] | None | object:
-    path_builder = getattr(args, "path_builder", None)
-    if path_builder is not None:
-        args.path = path_builder(args)
-    if hasattr(args, "model") and not hasattr(args, "path"):
-        if getattr(args, "query_action", None):
-            args.path = f"/api/v1/query/{path_quote(args.model)}/{args.query_action}"
-        elif getattr(args, "models_command", None) == "describe":
-            args.path = f"/api/v1/models/{path_quote(args.model)}/describe"
-    if getattr(args, "bundles_command", None) in {"update", "remove"}:
-        args.path = f"/api/v1/bundles/{path_quote(args.bundle)}"
-    if getattr(args, "datasources_command", None) in {"update", "remove"}:
-        args.path = f"/api/v1/datasources/{path_quote(args.datasource)}"
-    if getattr(args, "datasources_command", None) == "test":
-        args.path = f"/api/v1/datasources/{path_quote(args.datasource)}/test"
-    if getattr(args, "datasources_command", None) in {"bind", "binding"}:
-        args.path = f"/api/v1/namespaces/{path_quote(args.bind_namespace)}/datasource"
-    if getattr(args, "members_command", None) == "list":
-        args.path = (
-            f"/jdbc-model/dimension/v2/{path_quote(args.model)}/"
-            f"{path_quote(args.dimension)}"
-        )
     try:
+        path_builder = getattr(args, "path_builder", None)
+        if path_builder is not None:
+            args.path = path_builder(args)
+        if hasattr(args, "model") and not hasattr(args, "path"):
+            if getattr(args, "query_action", None):
+                args.path = f"/api/v1/query/{path_quote(args.model)}/{args.query_action}"
+            elif getattr(args, "models_command", None) == "describe":
+                args.path = f"/api/v1/models/{path_quote(args.model)}/describe"
+        if getattr(args, "bundles_command", None) in {"update", "remove"}:
+            args.path = f"/api/v1/bundles/{path_quote(args.bundle)}"
+        if getattr(args, "datasources_command", None) in {"update", "remove"}:
+            args.path = f"/api/v1/datasources/{path_quote(args.datasource)}"
+        if getattr(args, "datasources_command", None) == "test":
+            args.path = f"/api/v1/datasources/{path_quote(args.datasource)}/test"
+        if getattr(args, "datasources_command", None) in {"bind", "binding"}:
+            args.path = f"/api/v1/namespaces/{path_quote(args.bind_namespace)}/datasource"
+        if getattr(args, "members_command", None) == "list":
+            args.path = (
+                f"/jdbc-model/dimension/v2/{path_quote(args.model)}/"
+                f"{path_quote(args.dimension)}"
+            )
         return args.body_builder(args, stdin)
     except (OSError, ValueError) as exc:
         print(f"input error: {exc}", file=stderr)
@@ -1095,22 +1097,45 @@ def no_body(_args: argparse.Namespace, _stdin: TextIO) -> None:
 
 
 def analytics_bundle_validate_path(args: argparse.Namespace) -> str:
-    return f"/api/v1/bundles/{path_quote(args.analytics_bundle)}/validate"
+    bundle_ref = require_analytics_logical_ref(
+        "bundleRef", args.analytics_bundle
+    )
+    return f"/api/v1/bundles/{path_quote(bundle_ref)}/validate"
 
 
 def analytics_report_preview_path(args: argparse.Namespace) -> str:
+    bundle_ref = require_analytics_logical_ref(
+        "bundleRef", args.analytics_bundle
+    )
+    artifact_ref = require_analytics_logical_ref(
+        "artifactRef", args.analytics_artifact
+    )
     return (
-        f"/api/v1/bundles/{path_quote(args.analytics_bundle)}/reports/"
-        f"{path_quote(args.analytics_artifact)}/preview"
+        f"/api/v1/bundles/{path_quote(bundle_ref)}/reports/"
+        f"{path_quote(artifact_ref)}/preview"
     )
 
 
 def analytics_dashboard_path(args: argparse.Namespace) -> str:
+    bundle_ref = require_analytics_logical_ref(
+        "bundleRef", args.analytics_bundle
+    )
+    artifact_ref = require_analytics_logical_ref(
+        "artifactRef", args.analytics_artifact
+    )
     return (
-        f"/api/v1/bundles/{path_quote(args.analytics_bundle)}/dashboards/"
-        f"{path_quote(args.analytics_artifact)}/"
+        f"/api/v1/bundles/{path_quote(bundle_ref)}/dashboards/"
+        f"{path_quote(artifact_ref)}/"
         f"{path_quote(args.analytics_dashboard_action)}"
     )
+
+
+def require_analytics_logical_ref(field: str, value: str) -> str:
+    if not ANALYTICS_LOGICAL_REF.fullmatch(value):
+        raise ValueError(
+            f"{field} must be one 1-128 character ASCII URL-safe segment"
+        )
+    return value
 
 
 def analytics_bundle_validate_body(
