@@ -1,8 +1,40 @@
 # foggy-runtime-cli
 
-Standalone CLI for `Foggy Runtime API v1`.
+Standalone CLI transport for `Foggy Runtime API v1` and the independent
+`Analytics Runtime API v1`.
 
-The CLI talks only to `/api/v1/*` runtime endpoints. It does not call Java or Python engine private routes.
+The CLI talks only to public `/api/v1/*` operations under the configured base
+URL. It does not call Java or Python engine private routes.
+
+## Analytics Runtime Development Lane
+
+The development line installs both `foggy-runtime` and `foggy` executable
+aliases. Existing flat Runtime commands remain compatible, while the named
+domains are:
+
+```bash
+foggy runtime capabilities
+foggy analytics capabilities
+foggy analytics bundles list
+foggy analytics bundles validate sales --revision sha256:<64-hex>
+foggy analytics reports preview sales-summary \
+  --bundle sales \
+  --revision sha256:<64-hex> \
+  --authority-provider tms \
+  --authority-reference subject:42
+foggy analytics dashboards render sales-board \
+  --bundle sales \
+  --revision sha256:<64-hex> \
+  --authority-provider console \
+  --authority-reference session:7
+```
+
+Analytics uses `FOGGY_ANALYTICS_RUNTIME_API_URL`; its local co-hosted default is
+`http://127.0.0.1:8080/analytics`. Optional credentials use
+`FOGGY_ANALYTICS_RUNTIME_API_AUTH_CODE` and `FOGGY_ANALYTICS_AUTHORIZATION`.
+They do not fall back to the corresponding Foggy Runtime variables. Analytics
+Bundle roots, owner/ACL metadata, raw SQL, and raw permission filters are not
+accepted by these commands.
 
 ## Public AI Analysis Demo Quick Start
 

@@ -107,8 +107,13 @@ def is_data_plane_path(method: str, path: str) -> bool:
         "/api/v1/query/",
         "/api/v1/compose/",
         "/api/v1/members/",
+        "/api/v1/bundles/",
         "/jdbc-model/dimension/",
-    ))
+    )) and (
+        not normalized.startswith("/api/v1/bundles/")
+        or "/reports/" in normalized
+        or "/dashboards/" in normalized
+    )
 
 
 def _origin(url: str) -> tuple[str, str, int | None]:
