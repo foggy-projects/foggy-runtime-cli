@@ -13,14 +13,15 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
-import uuid
 import zipfile
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, TextIO
 
 from . import __version__
+from . import analytics_cli
 from .client import RuntimeApiClient, RuntimeTransportError, path_quote
+from .input_utils import read_json_payload
 
 EXIT_OK = 0
 EXIT_CLI_ERROR = 1
@@ -29,8 +30,6 @@ EXIT_UNSUPPORTED = 3
 EXIT_TRANSPORT_ERROR = 4
 
 DEFAULT_BASE_URL = "http://127.0.0.1:8080"
-DEFAULT_ANALYTICS_BASE_URL = "http://127.0.0.1:8080/analytics"
-ANALYTICS_LOGICAL_REF = re.compile(r"[A-Za-z0-9][A-Za-z0-9._~-]{0,127}")
 ANALYSIS_SKILL = "foggy-ai-analysis"
 SEMANTIC_QUERY_SKILL = "foggy-semantic-query"
 LEGACY_ANALYSIS_DEMO_SKILL = "foggy-ai-analysis-demo"
@@ -203,98 +202,7 @@ def build_parser() -> argparse.ArgumentParser:
     capabilities = subparsers.add_parser("capabilities")
     capabilities.set_defaults(method="GET", path="/api/v1/capabilities", body_builder=no_body)
 
-    analytics = subparsers.add_parser(
-        "analytics",
-        help="Call the independent Analytics Runtime API v1.",
-        description=(
-            "Analytics Bundle, Report, and Dashboard operations. This domain uses "
-            "FOGGY_ANALYTICS_RUNTIME_API_URL and separate Analytics credentials."
-        ),
-    )
-    add_analytics_transport_arguments(analytics)
-    analytics.set_defaults(
-        api_domain="analytics",
-        capability_registry_key="operations",
-        namespace=None,
-    )
-    analytics_commands = analytics.add_subparsers(
-        dest="analytics_command",
-        required=True,
-        parser_class=FoggyArgumentParser,
-    )
-
-    analytics_capabilities = analytics_commands.add_parser("capabilities")
-    analytics_capabilities.set_defaults(
-        method="GET",
-        path="/api/v1/capabilities",
-        body_builder=no_body,
-    )
-
-    analytics_bundles = analytics_commands.add_parser("bundles")
-    analytics_bundle_commands = analytics_bundles.add_subparsers(
-        dest="analytics_bundles_command",
-        required=True,
-        parser_class=FoggyArgumentParser,
-    )
-    analytics_bundle_list = analytics_bundle_commands.add_parser("list")
-    analytics_bundle_list.set_defaults(
-        method="GET",
-        path="/api/v1/bundles",
-        body_builder=no_body,
-        required_capabilities=["analytics.bundles.list"],
-    )
-    analytics_bundle_validate = analytics_bundle_commands.add_parser("validate")
-    analytics_bundle_validate.add_argument("analytics_bundle", metavar="bundle")
-    analytics_bundle_validate.add_argument(
-        "--revision",
-        dest="analytics_revision",
-        help="Optional exact sha256:<hex> Bundle revision assertion.",
-    )
-    add_analytics_correlation_arguments(analytics_bundle_validate)
-    analytics_bundle_validate.set_defaults(
-        method="POST",
-        body_builder=analytics_bundle_validate_body,
-        path_builder=analytics_bundle_validate_path,
-        required_capabilities=["analytics.bundles.validate"],
-    )
-
-    analytics_reports = analytics_commands.add_parser("reports")
-    analytics_report_commands = analytics_reports.add_subparsers(
-        dest="analytics_reports_command",
-        required=True,
-        parser_class=FoggyArgumentParser,
-    )
-    analytics_report_preview = analytics_report_commands.add_parser("preview")
-    analytics_report_preview.add_argument("analytics_artifact", metavar="report")
-    add_analytics_render_arguments(analytics_report_preview)
-    analytics_report_preview.set_defaults(
-        method="POST",
-        body_builder=analytics_render_body,
-        path_builder=analytics_report_preview_path,
-        required_capabilities=["analytics.reports.preview"],
-    )
-
-    analytics_dashboards = analytics_commands.add_parser("dashboards")
-    analytics_dashboard_commands = analytics_dashboards.add_subparsers(
-        dest="analytics_dashboards_command",
-        required=True,
-        parser_class=FoggyArgumentParser,
-    )
-    for analytics_dashboard_action in ("preview", "render"):
-        dashboard_parser = analytics_dashboard_commands.add_parser(
-            analytics_dashboard_action
-        )
-        dashboard_parser.add_argument("analytics_artifact", metavar="dashboard")
-        add_analytics_render_arguments(dashboard_parser)
-        dashboard_parser.set_defaults(
-            method="POST",
-            body_builder=analytics_render_body,
-            path_builder=analytics_dashboard_path,
-            analytics_dashboard_action=analytics_dashboard_action,
-            required_capabilities=[
-                f"analytics.dashboards.{analytics_dashboard_action}"
-            ],
-        )
+    analytics_cli.register_analytics_parser(subparsers, FoggyArgumentParser)
 
     wait_ready = subparsers.add_parser("wait-ready")
     wait_ready.add_argument("--timeout-seconds", type=float, default=90.0)
@@ -858,71 +766,11 @@ def add_script_request_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--options", help="Path to JSON object options file, or '-' for stdin.")
 
 
-def add_analytics_transport_arguments(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument(
-        "--base-url",
-        default=argparse.SUPPRESS,
-        help=(
-            "Analytics Runtime API base URL. Overrides "
-            "FOGGY_ANALYTICS_RUNTIME_API_URL."
-        ),
-    )
-    parser.add_argument(
-        "--output",
-        choices=["json", "pretty"],
-        default=argparse.SUPPRESS,
-        help="Output format.",
-    )
-    parser.add_argument(
-        "--timeout",
-        type=float,
-        default=argparse.SUPPRESS,
-        help="HTTP timeout seconds.",
-    )
-    parser.add_argument(
-        "--auth-code",
-        default=argparse.SUPPRESS,
-        help=(
-            "Analytics API auth code. Overrides "
-            "FOGGY_ANALYTICS_RUNTIME_API_AUTH_CODE and is sent as "
-            "X-Foggy-Runtime-Code."
-        ),
-    )
-    parser.add_argument(
-        "--authorization",
-        default=argparse.SUPPRESS,
-        help=(
-            "Opaque Analytics data-plane Authorization value. Overrides "
-            "FOGGY_ANALYTICS_AUTHORIZATION."
-        ),
-    )
-
-
-def add_analytics_correlation_arguments(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("--request-id")
-    parser.add_argument("--trace-id")
-
-
-def add_analytics_render_arguments(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("--bundle", dest="analytics_bundle", required=True)
-    parser.add_argument("--revision", dest="analytics_revision", required=True)
-    parser.add_argument(
-        "--parameters",
-        help="Path to a JSON object containing definition parameters, or '-' for stdin.",
-    )
-    parser.add_argument("--timezone", default="UTC")
-    parser.add_argument("--locale", default="en")
-    parser.add_argument("--authority-provider", required=True)
-    parser.add_argument("--authority-reference", required=True)
-    add_analytics_correlation_arguments(parser)
-
-
 def resolve_base_url(args: argparse.Namespace) -> str:
     if args.base_url:
         return args.base_url
     if getattr(args, "api_domain", "runtime") == "analytics":
-        analytics_url = os.environ.get("FOGGY_ANALYTICS_RUNTIME_API_URL")
-        return analytics_url if analytics_url else DEFAULT_ANALYTICS_BASE_URL
+        return analytics_cli.resolve_base_url(args)
     generic = os.environ.get("FOGGY_RUNTIME_API_URL")
     if generic:
         return generic
@@ -932,24 +780,18 @@ def resolve_base_url(args: argparse.Namespace) -> str:
 def resolve_auth_code(args: argparse.Namespace) -> str | None:
     if args.auth_code is not None:
         return args.auth_code
-    env_name = (
-        "FOGGY_ANALYTICS_RUNTIME_API_AUTH_CODE"
-        if getattr(args, "api_domain", "runtime") == "analytics"
-        else "FOGGY_RUNTIME_API_AUTH_CODE"
-    )
-    env_auth_code = os.environ.get(env_name)
+    if getattr(args, "api_domain", "runtime") == "analytics":
+        return analytics_cli.resolve_auth_code(args)
+    env_auth_code = os.environ.get("FOGGY_RUNTIME_API_AUTH_CODE")
     return env_auth_code if env_auth_code else None
 
 
 def resolve_authorization(args: argparse.Namespace) -> str | None:
     if args.authorization is not None:
         return args.authorization if args.authorization else None
-    env_name = (
-        "FOGGY_ANALYTICS_AUTHORIZATION"
-        if getattr(args, "api_domain", "runtime") == "analytics"
-        else "FOGGY_RUNTIME_AUTHORIZATION"
-    )
-    env_authorization = os.environ.get(env_name)
+    if getattr(args, "api_domain", "runtime") == "analytics":
+        return analytics_cli.resolve_authorization(args)
+    env_authorization = os.environ.get("FOGGY_RUNTIME_AUTHORIZATION")
     return env_authorization if env_authorization else None
 
 
@@ -1094,88 +936,6 @@ def build_body(args: argparse.Namespace, stdin: TextIO, stderr: TextIO) -> dict[
 
 def no_body(_args: argparse.Namespace, _stdin: TextIO) -> None:
     return None
-
-
-def analytics_bundle_validate_path(args: argparse.Namespace) -> str:
-    bundle_ref = require_analytics_logical_ref(
-        "bundleRef", args.analytics_bundle
-    )
-    return f"/api/v1/bundles/{path_quote(bundle_ref)}/validate"
-
-
-def analytics_report_preview_path(args: argparse.Namespace) -> str:
-    bundle_ref = require_analytics_logical_ref(
-        "bundleRef", args.analytics_bundle
-    )
-    artifact_ref = require_analytics_logical_ref(
-        "artifactRef", args.analytics_artifact
-    )
-    return (
-        f"/api/v1/bundles/{path_quote(bundle_ref)}/reports/"
-        f"{path_quote(artifact_ref)}/preview"
-    )
-
-
-def analytics_dashboard_path(args: argparse.Namespace) -> str:
-    bundle_ref = require_analytics_logical_ref(
-        "bundleRef", args.analytics_bundle
-    )
-    artifact_ref = require_analytics_logical_ref(
-        "artifactRef", args.analytics_artifact
-    )
-    return (
-        f"/api/v1/bundles/{path_quote(bundle_ref)}/dashboards/"
-        f"{path_quote(artifact_ref)}/"
-        f"{path_quote(args.analytics_dashboard_action)}"
-    )
-
-
-def require_analytics_logical_ref(field: str, value: str) -> str:
-    if not ANALYTICS_LOGICAL_REF.fullmatch(value):
-        raise ValueError(
-            f"{field} must be one 1-128 character ASCII URL-safe segment"
-        )
-    return value
-
-
-def analytics_bundle_validate_body(
-    args: argparse.Namespace,
-    _stdin: TextIO,
-) -> dict[str, Any]:
-    request_id, trace_id = analytics_correlation(args)
-    body: dict[str, Any] = {
-        "requestId": request_id,
-        "traceId": trace_id,
-    }
-    if args.analytics_revision:
-        body["expectedBundleRevision"] = args.analytics_revision
-    return body
-
-
-def analytics_render_body(
-    args: argparse.Namespace,
-    stdin: TextIO,
-) -> dict[str, Any]:
-    request_id, trace_id = analytics_correlation(args)
-    return {
-        "expectedBundleRevision": args.analytics_revision,
-        "parameters": (
-            read_json_payload(args.parameters, stdin) if args.parameters else {}
-        ),
-        "timezone": args.timezone,
-        "locale": args.locale,
-        "authority": {
-            "provider": args.authority_provider,
-            "reference": args.authority_reference,
-        },
-        "requestId": request_id,
-        "traceId": trace_id,
-    }
-
-
-def analytics_correlation(args: argparse.Namespace) -> tuple[str, str]:
-    request_id = args.request_id or f"foggy-cli-{uuid.uuid4()}"
-    return request_id, args.trace_id or request_id
 
 
 def bundle_add_body(args: argparse.Namespace, _stdin: TextIO) -> dict[str, Any]:
@@ -1471,24 +1231,6 @@ def read_script_source(args: argparse.Namespace, stdin: TextIO) -> str:
         return stdin.read()
     with open(args.script, "r", encoding="utf-8") as handle:
         return handle.read()
-
-
-def read_json_payload(payload_ref: str, stdin: TextIO) -> dict[str, Any]:
-    if payload_ref == "-":
-        raw = stdin.read()
-        source = "stdin"
-    else:
-        source = payload_ref
-        with open(payload_ref, "r", encoding="utf-8-sig") as handle:
-            raw = handle.read()
-    raw = raw.lstrip("\ufeff")
-    try:
-        payload = json.loads(raw)
-    except json.JSONDecodeError as exc:
-        raise ValueError(f"{source} is not valid JSON: {exc.msg}") from exc
-    if not isinstance(payload, dict):
-        raise ValueError(f"{source} must contain a JSON object")
-    return payload
 
 
 def is_semantic_resource_path(path: str) -> bool:

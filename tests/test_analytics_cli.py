@@ -3,6 +3,7 @@ from __future__ import annotations
 import io
 import json
 import os
+import re
 import tempfile
 import threading
 import unittest
@@ -12,6 +13,7 @@ from typing import Any
 from unittest.mock import patch
 
 from foggy_runtime_cli.client import RuntimeApiClient
+from foggy_runtime_cli.analytics_cli import ANALYTICS_SDK_V1_OPERATIONS
 from foggy_runtime_cli.main import EXIT_CLI_ERROR, EXIT_OK, EXIT_UNSUPPORTED, main
 
 
@@ -130,6 +132,40 @@ class AnalyticsCliContractTest(unittest.TestCase):
         self.assertIsNone(FakeClient.auth_code)
         self.assertIsNone(FakeClient.authorization)
 
+    def test_cli_operation_registry_matches_frozen_fixture_and_java_sdk_v1(self) -> None:
+        workspace = Path(__file__).resolve().parents[2]
+        fixture = json.loads((
+            workspace
+            / "docs/v4.1/contracts/analytics-function-v1/sdk-v1-operations.json"
+        ).read_text(encoding="utf-8"))
+        expected = set(fixture["operations"])
+
+        self.assertEqual(expected, set(ANALYTICS_SDK_V1_OPERATIONS))
+
+        java_source = (
+            workspace
+            / "foggy-data-mcp-bridge/foggy-analytics-function-contract/src/main/java"
+            / "com/foggyframework/analytics/function/contract/AnalyticsFunctionOperations.java"
+        )
+        if not java_source.is_file():
+            self.skipTest("Java Analytics contract checkout is not present")
+        source = java_source.read_text(encoding="utf-8")
+        constants = dict(re.findall(
+            r'public static final String ([A-Z_]+)\s*=\s*"([^"]+)";',
+            source,
+        ))
+        sdk_block = re.search(
+            r"SDK_V1\s*=\s*Set\.of\((.*?)\);",
+            source,
+            re.DOTALL,
+        )
+        self.assertIsNotNone(sdk_block)
+        java_sdk = {
+            constants[name]
+            for name in re.findall(r"\b[A-Z][A-Z_]+\b", sdk_block.group(1))
+        }
+        self.assertEqual(expected, java_sdk)
+
     def test_bundle_validate_uses_analytics_preflight_and_exact_route(self) -> None:
         FakeClient.responses = [
             analytics_capabilities(**{"analytics.bundles.validate": "supported"}),
@@ -170,6 +206,71 @@ class AnalyticsCliContractTest(unittest.TestCase):
             ],
             FakeClient.calls,
         )
+
+    def test_design_time_operations_use_exact_routes_and_control_plane_payloads(self) -> None:
+        cases = (
+            (
+                [
+                    "analytics", "bundles", "describe", "sales",
+                    "--revision", REVISION, "--request-id", "describe-bundle",
+                ],
+                "analytics.bundles.describe",
+                "/api/v1/bundles/sales/describe",
+                {
+                    "expectedBundleRevision": REVISION,
+                    "requestId": "describe-bundle",
+                    "traceId": "describe-bundle",
+                },
+            ),
+            (
+                [
+                    "analytics", "artifacts", "describe", "sales-summary",
+                    "--kind", "report", "--bundle", "sales",
+                    "--revision", REVISION, "--request-id", "describe-artifact",
+                ],
+                "analytics.artifacts.describe",
+                "/api/v1/bundles/sales/artifacts/report/sales-summary/describe",
+                {
+                    "expectedBundleRevision": REVISION,
+                    "requestId": "describe-artifact",
+                    "traceId": "describe-artifact",
+                },
+            ),
+            (
+                [
+                    "analytics", "model-dependencies", "resolve", "SalesQuery",
+                    "--kind", "qm", "--namespace", "tms-ai",
+                    "--request-id", "resolve-model", "--trace-id", "trace-model",
+                ],
+                "analytics.model-dependencies.resolve",
+                "/api/v1/model-dependencies/resolve",
+                {
+                    "namespace": "tms-ai",
+                    "modelKind": "qm",
+                    "modelName": "SalesQuery",
+                    "requestId": "resolve-model",
+                    "traceId": "trace-model",
+                },
+            ),
+        )
+
+        for argv, operation, path, body in cases:
+            with self.subTest(operation=operation):
+                FakeClient.calls = []
+                FakeClient.responses = [
+                    analytics_capabilities(**{operation: "supported"}),
+                    {"success": True, "engine": "java", "data": {}},
+                ]
+                code, _output, error = self.run_cli(argv)
+                self.assertEqual(EXIT_OK, code)
+                self.assertEqual("", error)
+                self.assertEqual(
+                    [
+                        ("GET", "/api/v1/capabilities", None),
+                        ("POST", path, body),
+                    ],
+                    FakeClient.calls,
+                )
 
     def test_report_preview_builds_product_neutral_payload(self) -> None:
         FakeClient.responses = [
