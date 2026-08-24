@@ -228,7 +228,7 @@ class CliTest(unittest.TestCase):
             (source / "SKILL.md").write_text("---\nname: foggy-ai-analysis\n---\n", encoding="utf-8")
             (source / "references" / "public-onboarding.md").write_text("content\n", encoding="utf-8")
 
-            with patch("foggy_runtime_cli.main.Path.home", return_value=home):
+            with patch("foggy_runtime_cli.skills_cli.Path.home", return_value=home):
                 code, output, error = self.run_cli(
                     ["skills", "install", "foggy-ai-analysis", "--source-dir", str(source)]
                 )
@@ -264,7 +264,7 @@ class CliTest(unittest.TestCase):
         self.assertIn("sha256", body["data"]["stack"]["components"]["launcher"]["assets"]["startShell"])
 
     def test_stack_show_default_manifest_failure_falls_back_with_warning(self) -> None:
-        with patch("foggy_runtime_cli.main.read_text_resource", side_effect=OSError("offline")):
+        with patch("foggy_runtime_cli.stack_cli.read_text_resource", side_effect=OSError("offline")):
             code, output, error = self.run_cli(["stack", "show"])
 
         body = json.loads(output)
@@ -277,8 +277,8 @@ class CliTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             home = Path(temp_dir) / "home"
             with (
-                patch("foggy_runtime_cli.main.Path.home", return_value=home),
-                patch("foggy_runtime_cli.main.read_text_resource", side_effect=OSError("offline")),
+                patch("foggy_runtime_cli.skills_cli.Path.home", return_value=home),
+                patch("foggy_runtime_cli.stack_cli.read_text_resource", side_effect=OSError("offline")),
             ):
                 code, output, error = self.run_cli(["skills", "install", "foggy-ai-analysis", "--replace"])
 
@@ -307,7 +307,7 @@ class CliTest(unittest.TestCase):
                 },
             )
 
-            with patch("foggy_runtime_cli.main.Path.home", return_value=home):
+            with patch("foggy_runtime_cli.skills_cli.Path.home", return_value=home):
                 code, output, error = self.run_cli(
                     [
                         "skills",
@@ -338,7 +338,7 @@ class CliTest(unittest.TestCase):
             zip_path = root / "foggy-ai-analysis-skill-9.9.9.zip"
             self.write_minimal_skill_zip(zip_path, "foggy-ai-analysis")
 
-            with patch("foggy_runtime_cli.main.Path.home", return_value=home):
+            with patch("foggy_runtime_cli.skills_cli.Path.home", return_value=home):
                 code, output, error = self.run_cli(
                     [
                         "skills",
@@ -368,7 +368,7 @@ class CliTest(unittest.TestCase):
             zip_path = root / "custom-analysis.zip"
             self.write_minimal_skill_zip(zip_path, "foggy-ai-analysis")
 
-            with patch("foggy_runtime_cli.main.Path.home", return_value=home):
+            with patch("foggy_runtime_cli.skills_cli.Path.home", return_value=home):
                 code, output, error = self.run_cli(
                     [
                         "skills",
@@ -408,7 +408,7 @@ class CliTest(unittest.TestCase):
                 },
             )
 
-            with patch("foggy_runtime_cli.main.Path.home", return_value=home):
+            with patch("foggy_runtime_cli.skills_cli.Path.home", return_value=home):
                 code, output, error = self.run_cli(
                     ["skills", "install", "foggy-ai-analysis", "--stack-manifest", str(manifest_path)]
                 )
@@ -439,7 +439,7 @@ class CliTest(unittest.TestCase):
                 },
             )
 
-            with patch("foggy_runtime_cli.main.Path.home", return_value=home):
+            with patch("foggy_runtime_cli.skills_cli.Path.home", return_value=home):
                 code, output, error = self.run_cli(
                     ["skills", "install", "foggy-ai-analysis", "--stack-manifest", str(manifest_path)]
                 )
@@ -469,7 +469,7 @@ class CliTest(unittest.TestCase):
                 },
             )
 
-            with patch("foggy_runtime_cli.main.Path.home", return_value=home):
+            with patch("foggy_runtime_cli.skills_cli.Path.home", return_value=home):
                 code, output, error = self.run_cli(
                     [
                         "skills",
@@ -514,7 +514,7 @@ class CliTest(unittest.TestCase):
                 },
             )
 
-            with patch("foggy_runtime_cli.main.Path.home", return_value=home):
+            with patch("foggy_runtime_cli.skills_cli.Path.home", return_value=home):
                 code, output, error = self.run_cli(
                     [
                         "skills",
@@ -568,7 +568,7 @@ class CliTest(unittest.TestCase):
                 },
             )
 
-            with patch("foggy_runtime_cli.main.Path.home", return_value=home):
+            with patch("foggy_runtime_cli.skills_cli.Path.home", return_value=home):
                 code, output, error = self.run_cli(
                     [
                         "skills",
@@ -611,8 +611,8 @@ class CliTest(unittest.TestCase):
                 return real_copytree(src, dst, **kwargs)
 
             with (
-                patch("foggy_runtime_cli.main.Path.home", return_value=home),
-                patch("foggy_runtime_cli.main.shutil.copytree", side_effect=flaky_copytree),
+                patch("foggy_runtime_cli.skills_cli.Path.home", return_value=home),
+                patch("foggy_runtime_cli.skills_cli.shutil.copytree", side_effect=flaky_copytree),
             ):
                 code, output, error = self.run_cli(
                     ["skills", "install", "foggy-analysis-suite", "--workspace-root", str(workspace)]
@@ -638,7 +638,7 @@ class CliTest(unittest.TestCase):
             target.mkdir(parents=True)
             (target / "SKILL.md").write_text("existing\n", encoding="utf-8")
 
-            with patch("foggy_runtime_cli.main.Path.home", return_value=home):
+            with patch("foggy_runtime_cli.skills_cli.Path.home", return_value=home):
                 code, output, error = self.run_cli(
                     ["skills", "install", "foggy-ai-analysis", "--source-dir", str(source)]
                 )
@@ -659,7 +659,7 @@ class CliTest(unittest.TestCase):
             (source / "SKILL.md").write_text("---\nname: foggy-semantic-query\n---\n", encoding="utf-8")
             (source / "references" / "query-model-dsl.md").write_text("content\n", encoding="utf-8")
 
-            with patch("foggy_runtime_cli.main.Path.home", return_value=home):
+            with patch("foggy_runtime_cli.skills_cli.Path.home", return_value=home):
                 code, output, error = self.run_cli(
                     ["skills", "install", "foggy-semantic-query", "--workspace-root", str(workspace)]
                 )
@@ -686,7 +686,7 @@ class CliTest(unittest.TestCase):
             (ai_source / "SKILL.md").write_text("---\nname: foggy-ai-analysis\n---\n", encoding="utf-8")
             (semantic_source / "SKILL.md").write_text("---\nname: foggy-semantic-query\n---\n", encoding="utf-8")
 
-            with patch("foggy_runtime_cli.main.Path.home", return_value=home):
+            with patch("foggy_runtime_cli.skills_cli.Path.home", return_value=home):
                 code, output, error = self.run_cli(
                     ["skills", "install", "foggy-analysis-suite", "--workspace-root", str(workspace)]
                 )
@@ -2083,7 +2083,7 @@ class CliTest(unittest.TestCase):
             skill_dir = repo_root / ".codex" / "skills" / "foggy-ai-analysis"
             demo_dir = self.write_minimal_sales_drop_assets(skill_dir)
 
-            with patch("foggy_runtime_cli.main.Path.home", return_value=home):
+            with patch("foggy_runtime_cli.skills_cli.Path.home", return_value=home):
                 code, output, error = self.run_cli(
                     ["demo", "sales-drop", "plan", "--repo-root", str(repo_root), "--port", "18066"]
                 )
@@ -2111,7 +2111,7 @@ class CliTest(unittest.TestCase):
             installed_demo_dir = self.write_minimal_sales_drop_assets(installed_skill)
             self.write_minimal_sales_drop_assets(workspace_skill)
 
-            with patch("foggy_runtime_cli.main.Path.home", return_value=home):
+            with patch("foggy_runtime_cli.skills_cli.Path.home", return_value=home):
                 code, output, error = self.run_cli(
                     ["demo", "sales-drop", "plan", "--repo-root", str(repo_root)]
                 )
@@ -2158,7 +2158,7 @@ class CliTest(unittest.TestCase):
     def test_demo_sales_drop_plan_reports_missing_assets(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             home = Path(temp_dir) / "home"
-            with patch("foggy_runtime_cli.main.Path.home", return_value=home):
+            with patch("foggy_runtime_cli.skills_cli.Path.home", return_value=home):
                 code, output, error = self.run_cli(["demo", "sales-drop", "plan", "--repo-root", temp_dir])
 
         payload = json.loads(output)
@@ -2456,7 +2456,7 @@ class CliTest(unittest.TestCase):
     def test_demo_sales_drop_replay_missing_assets_mentions_install_command(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             home = Path(temp_dir) / "home"
-            with patch("foggy_runtime_cli.main.Path.home", return_value=home):
+            with patch("foggy_runtime_cli.skills_cli.Path.home", return_value=home):
                 code, output, error = self.run_cli(
                     [
                         "--base-url",
