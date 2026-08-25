@@ -87,6 +87,17 @@ def default_stack_manifest() -> dict[str, Any]:
                 "version": "0.1.17",
                 "runtimeApiContract": "foggy-runtime-api/v1",
                 "breaking": False,
+                "features": {
+                    "analyticsConsole": {
+                        "embedded": False,
+                        "enabledByDefault": False,
+                        "reason": (
+                            "The built-in fallback pins launcher 0.1.17, which predates "
+                            "the standard embedded Analytics Console. Inspect a newer "
+                            "runtime-launcher-manifest.json before using the Console opt-in."
+                        ),
+                    }
+                },
                 "releaseUrl": "https://github.com/foggy-projects/foggy-data-mcp-bridge/releases/tag/" + launcher_tag,
                 "assets": {
                     "jar": {

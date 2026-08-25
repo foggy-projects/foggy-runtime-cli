@@ -262,6 +262,10 @@ class CliTest(unittest.TestCase):
         )
         self.assertIn("startPowerShell", body["data"]["stack"]["components"]["launcher"]["assets"])
         self.assertIn("sha256", body["data"]["stack"]["components"]["launcher"]["assets"]["startShell"])
+        console = body["data"]["stack"]["components"]["launcher"]["features"]["analyticsConsole"]
+        self.assertFalse(console["embedded"])
+        self.assertFalse(console["enabledByDefault"])
+        self.assertIn("predates", console["reason"])
 
     def test_stack_show_default_manifest_failure_falls_back_with_warning(self) -> None:
         with patch("foggy_runtime_cli.stack_cli.read_text_resource", side_effect=OSError("offline")):

@@ -36,6 +36,34 @@ They do not fall back to the corresponding Foggy Runtime variables. Analytics
 Bundle roots, owner/ACL metadata, raw SQL, and raw permission filters are not
 accepted by these commands.
 
+## Embedded Analytics Console
+
+New standard Foggy Runtime Launcher releases can embed the Analytics Console backend and
+prebuilt SPA in the executable JAR. Users do not install Node.js or a separate Console
+package. Check the downloaded `runtime-launcher-manifest.json` before enabling it:
+
+```powershell
+$manifest = Get-Content .\runtime-launcher-manifest.json -Raw | ConvertFrom-Json
+$manifest.features.analyticsConsole
+```
+
+Only use the Console switch when `embedded=true`. It remains disabled by default:
+
+```powershell
+.\start-foggy-runtime.ps1 -AnalyticsConsole
+```
+
+```bash
+ANALYTICS_CONSOLE_ENABLED=true ./start-foggy-runtime.sh
+```
+
+Then verify Runtime API readiness and open `/analytics-console/`. FAP is an optional,
+separately managed integration and remains disabled; the launcher never creates FAP
+providers, Skills, Capabilities, Functions, credentials, or workspace bindings. The
+CLI built-in offline stack currently pins launcher `0.1.17`, whose manifest truthfully
+reports that the embedded Console is unavailable. Use the stable online stack's newer
+launcher recommendation after that release is published.
+
 ## Public AI Analysis Demo Quick Start
 
 Current validated public onboarding baseline:
