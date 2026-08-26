@@ -60,18 +60,18 @@ ANALYTICS_CONSOLE_ENABLED=true ./start-foggy-runtime.sh
 Then verify Runtime API readiness and open `/analytics-console/`. FAP is an optional,
 separately managed integration and remains disabled; the launcher never creates FAP
 providers, Skills, Capabilities, Functions, credentials, or workspace bindings. The
-CLI built-in offline stack currently pins launcher `0.1.17`, whose manifest truthfully
-reports that the embedded Console is unavailable. Use the stable online stack's newer
-launcher recommendation after that release is published.
+CLI built-in offline stack and the stable online stack both pin launcher `0.1.18`. Its manifest
+reports the embedded Console and Analytics Runtime API, keeps both disabled by default, and exposes
+the explicit Console opt-in shown above. FAP remains disabled and host-managed.
 
 ## Public AI Analysis Demo Quick Start
 
 Current validated public onboarding baseline:
 
 - CLI: `v0.1.22`
-- `foggy-ai-analysis` Skill: `v0.1.16`
-- optional `foggy-semantic-query` Skill: `v0.1.16`
-- Foggy Runtime Launcher: `foggy-runtime-launcher-v0.1.17`
+- `foggy-ai-analysis` Skill: `v0.1.17`
+- optional `foggy-semantic-query` Skill: `v0.1.17`
+- Foggy Runtime Launcher: `foggy-runtime-launcher-v0.1.18`
 - Stable stack manifest: `https://raw.githubusercontent.com/foggy-projects/foggy-ai-analysis/main/stack/stable.json`
 - Runtime URL: `http://127.0.0.1:18066`
 - Namespace: `salesdrop`
@@ -145,14 +145,14 @@ question-bank total=12 executable=11 pass=11 fail=0 needs-clarification=1
 
 Current boundary: `--use-default-datasource` is still the public sales-drop replay default because that example owns and reseeds a local SQLite file. For user business data, keep the user datasource separate from sales-drop demo data: register a Runtime API-managed datasource, bind it to the target namespace, validate the bundle, refresh, describe, and run a query smoke against that namespace. Use `datasources diagnostics` to record registry paths and namespace bindings before restart evidence. The launcher is dev/test-only and reports `securityMode=none-dev-test-only`; production permission, auth, RBAC, audit, and governance are deferred.
 
-For `foggy-ai-analysis` Skill v0.1.16, the replay must reseed the Java runtime default SQLite file with the Skill-bundled `schema.sql` and `data.sql`. Reusing an older `sales_drop_daily` table can leave out customer dimension columns required by the current TM/QM.
+For `foggy-ai-analysis` Skill v0.1.17, the replay must reseed the Java runtime default SQLite file with the Skill-bundled `schema.sql` and `data.sql`. Reusing an older `sales_drop_daily` table can leave out customer dimension columns required by the current TM/QM.
 
 For Runtime API management operations against runtimes configured with `securityMode=auth-code`, use CLI `v0.1.6` or later and pass `--auth-code` or `FOGGY_RUNTIME_API_AUTH_CODE`. This auth-code path is separate from the current public sales-drop demo baseline above.
 
 Copyable first prompt for an LLM session:
 
 ```text
-Use foggy-runtime-cli v0.1.22, the formal foggy-ai-analysis Skill v0.1.16 release assets, and Foggy Runtime Launcher `foggy-runtime-launcher-v0.1.17`. Install the Skill into ~/.agents/skills/foggy-ai-analysis, start the Java runtime on http://127.0.0.1:18066 with a SQLite default datasource, then run foggy-runtime demo sales-drop replay with --use-default-datasource and the same SQLite path so the bundled schema.sql/data.sql reseeds the runtime default SQLite file. For user business data, use a separate Runtime API-managed datasource and namespace binding instead of mixing it with the sales-drop SQLite file. Record commands, checksums, runtime URL, namespace, datasource mode, diagnostics, question-bank totals, evidence files, failures, and fixes. Production permission/auth/RBAC/audit/governance are out of scope for this demo.
+Use foggy-runtime-cli v0.1.22, the formal foggy-ai-analysis Skill v0.1.17 release assets, and Foggy Runtime Launcher `foggy-runtime-launcher-v0.1.18`. Install the Skill into ~/.agents/skills/foggy-ai-analysis, start the Java runtime on http://127.0.0.1:18066 with a SQLite default datasource, then run foggy-runtime demo sales-drop replay with --use-default-datasource and the same SQLite path so the bundled schema.sql/data.sql reseeds the runtime default SQLite file. For user business data, use a separate Runtime API-managed datasource and namespace binding instead of mixing it with the sales-drop SQLite file. Record commands, checksums, runtime URL, namespace, datasource mode, diagnostics, question-bank totals, evidence files, failures, and fixes. Production permission/auth/RBAC/audit/governance are out of scope for this demo.
 ```
 
 ## Installation
@@ -225,7 +225,7 @@ foggy-runtime skills install foggy-semantic-query --replace
 Pinned release zip install:
 
 ```powershell
-foggy-runtime skills install foggy-ai-analysis --zip .\foggy-ai-analysis-skill-0.1.16.zip --replace
+foggy-runtime skills install foggy-ai-analysis --zip .\foggy-ai-analysis-skill-0.1.17.zip --replace
 ```
 
 Supported local workspace installs:
@@ -252,7 +252,16 @@ Linux/macOS:
 bash scripts/build-release.sh --clean
 ```
 
-The release build runs tests by default, builds wheel and sdist artifacts into `dist/`, then writes `dist/SHA256SUMS` and `dist/release-manifest.json`.
+The release build runs tests by default and writes the exact six publishable assets into `dist/`:
+wheel, sdist, both installers, `SHA256SUMS`, and `release-manifest.json`. New manifests declare
+`checksumCoverage=all-release-assets`, so one `sha256sum -c dist/SHA256SUMS` verifies every asset
+except the checksum file itself.
+
+GitHub Release is the authoritative CLI distribution source. After a GitHub release is verified, an
+operator may explicitly mirror its exact six assets to the company download server with the
+workspace `scripts/publish-foggy-github-release-to-company.sh` command. That optional mirror returns
+permanent `download.qlfloor.com` links. OBS is not part of the default release path; its workflow is
+manual-only.
 
 GitHub releases are created from tags by `.github/workflows/release.yml`:
 
@@ -428,7 +437,7 @@ foggy-runtime --base-url http://127.0.0.1:18066 demo sales-drop replay `
 For the public sales-drop replay, use `--use-default-datasource` and start Java with the same SQLite file:
 
 ```powershell
-java -Dfile.encoding=UTF-8 -jar foggy-runtime-launcher-0.1.17.jar `
+java -Dfile.encoding=UTF-8 -jar foggy-runtime-launcher-0.1.18.jar `
   --server.port=18066 `
   --spring.profiles.active=lite `
   --foggy.runtime-api.enabled=true `

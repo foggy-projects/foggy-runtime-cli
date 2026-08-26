@@ -82,15 +82,6 @@ if [[ "${#artifacts[@]}" == "0" ]]; then
   exit 1
 fi
 
-: > "$checksums"
-for artifact in "${artifacts[@]}"; do
-  if command -v sha256sum >/dev/null 2>&1; then
-    sha256sum "$dist_dir/$artifact" | sed "s#$dist_dir/##" >> "$checksums"
-  else
-    shasum -a 256 "$dist_dir/$artifact" | sed "s#$dist_dir/##" >> "$checksums"
-  fi
-done
-
 python - "$project_version" "$dist_dir" "$manifest" <<'PY'
 import hashlib
 import json
@@ -115,8 +106,32 @@ manifest.write_text(json.dumps({
     "generatedAt": datetime.now(timezone.utc).isoformat(),
     "artifacts": artifacts,
     "checksums": "SHA256SUMS",
+    "checksumCoverage": "all-release-assets",
 }, indent=2) + "\n", encoding="utf-8")
 PY
+
+cp "$project_root/scripts/install-foggy-runtime-cli.ps1" "$dist_dir/"
+cp "$project_root/scripts/install-foggy-runtime-cli.sh" "$dist_dir/"
+
+checksum_sources=()
+for artifact in "${artifacts[@]}"; do
+  checksum_sources+=("$dist_dir/$artifact")
+done
+checksum_sources+=(
+  "$dist_dir/install-foggy-runtime-cli.ps1"
+  "$dist_dir/install-foggy-runtime-cli.sh"
+  "$manifest"
+)
+: > "$checksums"
+for checksum_source in "${checksum_sources[@]}"; do
+  checksum_name=$(basename "$checksum_source")
+  if command -v sha256sum >/dev/null 2>&1; then
+    checksum_hash=$(sha256sum "$checksum_source" | cut -d' ' -f1)
+  else
+    checksum_hash=$(shasum -a 256 "$checksum_source" | cut -d' ' -f1)
+  fi
+  printf '%s  %s\n' "$checksum_hash" "$checksum_name" >> "$checksums"
+done
 
 echo "Release package ready."
 echo "Version: $project_version"

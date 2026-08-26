@@ -605,10 +605,10 @@ if (-not $EvidenceDir) {
     $EvidenceDir = Resolve-DefaultPath -Base $RepoRoot -Relative ".codex-tmp\foggy-ai-analysis-demo\sales-drop-replay-$stamp"
 }
 if (-not $LauncherJar) {
-    $LauncherJar = Resolve-DefaultPath -Base $RepoRoot -Relative "foggy-data-mcp-bridge-wt-dev-compose\foggy-mcp-launcher\target\foggy-mcp-launcher-9.1.0.beta.jar"
+    $LauncherJar = Resolve-DefaultPath -Base $RepoRoot -Relative "foggy-data-mcp-bridge\foggy-mcp-launcher\target\foggy-mcp-launcher-9.3.0-SNAPSHOT.jar"
 }
 
-$DemoDir = Resolve-DefaultPath -Base $RepoRoot -Relative ".codex\skills\foggy-ai-analysis-demo\assets\sales-drop-demo"
+$DemoDir = Resolve-DefaultPath -Base $RepoRoot -Relative ".codex\skills\foggy-ai-analysis\assets\sales-drop-demo"
 $SchemaPath = Join-Path $DemoDir "schema.sql"
 $DataPath = Join-Path $DemoDir "data.sql"
 $ModelsDir = Join-Path $DemoDir "models"

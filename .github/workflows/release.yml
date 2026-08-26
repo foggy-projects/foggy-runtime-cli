@@ -34,8 +34,8 @@ jobs:
             dist/*.tar.gz
             dist/SHA256SUMS
             dist/release-manifest.json
-            scripts/install-foggy-runtime-cli.ps1
-            scripts/install-foggy-runtime-cli.sh
+            dist/install-foggy-runtime-cli.ps1
+            dist/install-foggy-runtime-cli.sh
 
       - name: Create GitHub release
         if: startsWith(github.ref, 'refs/tags/')
@@ -57,13 +57,14 @@ jobs:
           Public Foggy AI analysis onboarding uses three release inputs:
 
           1. Install this CLI release.
-          2. Download foggy-ai-analysis Skill v0.1.16 from https://github.com/foggy-projects/foggy-ai-analysis/releases/tag/v0.1.16.
-          3. Download Foggy Runtime Launcher foggy-runtime-launcher-v0.1.17 from https://github.com/foggy-projects/foggy-data-mcp-bridge/releases/tag/foggy-runtime-launcher-v0.1.17.
+          2. Download the paired foggy-ai-analysis and foggy-semantic-query Skills v0.1.17 from https://github.com/foggy-projects/foggy-ai-analysis/releases/tag/v0.1.17.
+          3. Download Foggy Runtime Launcher foggy-runtime-launcher-v0.1.18 from https://github.com/foggy-projects/foggy-data-mcp-bridge/releases/tag/foggy-runtime-launcher-v0.1.18.
 
           The sales-drop public demo should run with the Java runtime default SQLite datasource and:
 
           \`\`\`powershell
-          foggy-runtime skills install foggy-ai-analysis --zip .\foggy-ai-analysis-skill-0.1.16.zip --replace
+          foggy-runtime skills install foggy-ai-analysis --zip .\foggy-ai-analysis-skill-0.1.17.zip --replace
+          foggy-runtime skills install foggy-semantic-query --zip .\foggy-semantic-query-skill-0.1.17.zip --replace
           foggy-runtime --base-url http://127.0.0.1:18066 demo sales-drop replay --evidence-dir <evidence> --sqlite-path <runtime-default-sqlite> --use-default-datasource
           \`\`\`
 
@@ -74,7 +75,7 @@ jobs:
             dist/*.tar.gz \
             dist/SHA256SUMS \
             dist/release-manifest.json \
-            scripts/install-foggy-runtime-cli.ps1 \
-            scripts/install-foggy-runtime-cli.sh \
+            dist/install-foggy-runtime-cli.ps1 \
+            dist/install-foggy-runtime-cli.sh \
             --title "Foggy Runtime CLI ${tag}" \
             --notes-file release-notes.md

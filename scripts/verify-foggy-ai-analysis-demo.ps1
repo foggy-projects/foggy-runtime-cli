@@ -162,13 +162,13 @@ if (-not $EvidenceDir) {
     $EvidenceDir = Resolve-DefaultPath -Base $RepoRoot -Relative ".codex-tmp\foggy-ai-analysis-demo\preflight-$stamp"
 }
 if (-not $LauncherJar) {
-    $LauncherJar = Resolve-DefaultPath -Base $RepoRoot -Relative "foggy-data-mcp-bridge-wt-dev-compose\foggy-mcp-launcher\target\foggy-mcp-launcher-9.1.0.beta.jar"
+    $LauncherJar = Resolve-DefaultPath -Base $RepoRoot -Relative "foggy-data-mcp-bridge\foggy-mcp-launcher\target\foggy-mcp-launcher-9.3.0-SNAPSHOT.jar"
 }
 if (-not $SkillValidator) {
     $SkillValidator = Join-Path $env:USERPROFILE ".codex\skills\.system\skill-creator\scripts\quick_validate.py"
 }
 
-$SkillDir = Resolve-DefaultPath -Base $RepoRoot -Relative ".codex\skills\foggy-ai-analysis-demo"
+$SkillDir = Resolve-DefaultPath -Base $RepoRoot -Relative ".codex\skills\foggy-ai-analysis"
 $DemoDir = Join-Path $SkillDir "assets\sales-drop-demo"
 $CliSrc = Resolve-DefaultPath -Base $RepoRoot -Relative "foggy-runtime-cli\src"
 $ReportJson = Join-Path $EvidenceDir "preflight-report.json"

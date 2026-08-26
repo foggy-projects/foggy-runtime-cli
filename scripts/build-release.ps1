@@ -71,11 +71,9 @@ try {
         throw "No wheel or sdist artifacts were created in $DistDir"
     }
 
-    $checksumLines = @()
     $artifactRows = @()
     foreach ($file in $files) {
         $hash = (Get-FileHash -Path $file.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
-        $checksumLines += "$hash  $($file.Name)"
         $artifactRows += [ordered]@{
             file = $file.Name
             sha256 = $hash
@@ -83,16 +81,29 @@ try {
         }
     }
 
-    $checksumLines | Out-File -FilePath $Checksums -Encoding ascii
-
     $manifestBody = [ordered]@{
         schemaVersion = "foggy-runtime-cli-release/v1"
         version = $projectVersion
         generatedAt = (Get-Date).ToString("o")
         artifacts = $artifactRows
         checksums = "SHA256SUMS"
+        checksumCoverage = "all-release-assets"
     }
     $manifestBody | ConvertTo-Json -Depth 5 | Out-File -FilePath $Manifest -Encoding utf8
+
+    Copy-Item -LiteralPath (Join-Path $ProjectRoot "scripts\install-foggy-runtime-cli.ps1") -Destination $DistDir -Force
+    Copy-Item -LiteralPath (Join-Path $ProjectRoot "scripts\install-foggy-runtime-cli.sh") -Destination $DistDir -Force
+
+    $checksumFiles = @($files) + @(
+        (Get-Item (Join-Path $DistDir "install-foggy-runtime-cli.ps1")),
+        (Get-Item (Join-Path $DistDir "install-foggy-runtime-cli.sh")),
+        (Get-Item $Manifest)
+    )
+    $checksumLines = foreach ($file in $checksumFiles) {
+        $hash = (Get-FileHash -Path $file.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+        "$hash  $($file.Name)"
+    }
+    $checksumLines | Out-File -FilePath $Checksums -Encoding ascii
 
     Write-Host "Release package ready."
     Write-Host "Version: $projectVersion"

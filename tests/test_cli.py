@@ -203,7 +203,7 @@ class CliTest(unittest.TestCase):
             (
                 ["demo", "sales-drop", "-help"],
                 [
-                    "foggy-runtime skills install foggy-ai-analysis --zip foggy-ai-analysis-skill-0.1.16.zip --replace",
+                    "foggy-runtime skills install foggy-ai-analysis --zip foggy-ai-analysis-skill-0.1.17.zip --replace",
                     "~/.agents/skills/foggy-ai-analysis",
                 ],
             ),
@@ -244,8 +244,8 @@ class CliTest(unittest.TestCase):
             self.assertEqual(str(home / ".agents" / "skills"), body["data"]["targetRoot"])
             self.assertEqual("agents-skills-only", body["data"]["installPolicy"])
             self.assertEqual(str(target_dir / "assets" / "sales-drop-demo"), body["data"]["salesDropDemoDir"])
-            self.assertIn("--zip foggy-ai-analysis-skill-0.1.16.zip", body["data"]["demoInstallCommand"])
-            self.assertIn("foggy-ai-analysis/releases/download/v0.1.16", body["data"]["publicZipUrl"])
+            self.assertIn("--zip foggy-ai-analysis-skill-0.1.17.zip", body["data"]["demoInstallCommand"])
+            self.assertIn("foggy-ai-analysis/releases/download/v0.1.17", body["data"]["publicZipUrl"])
             self.assertIn("--workspace-root <workspace-root>", body["data"]["workspaceInstallCommand"])
 
     def test_stack_show_offline_returns_builtin_fallback(self) -> None:
@@ -255,17 +255,19 @@ class CliTest(unittest.TestCase):
         self.assertEqual(EXIT_OK, code)
         self.assertEqual("", error)
         self.assertEqual("builtin:fallback", body["data"]["stackManifestSource"])
-        self.assertEqual("0.1.16", body["data"]["stack"]["components"]["skills"]["foggy-ai-analysis"]["recommendedVersion"])
+        self.assertEqual("0.1.17", body["data"]["stack"]["components"]["skills"]["foggy-ai-analysis"]["recommendedVersion"])
         self.assertEqual(
-            "foggy-runtime-launcher-v0.1.17",
+            "foggy-runtime-launcher-v0.1.18",
             body["data"]["stack"]["components"]["launcher"]["recommendedTag"],
         )
         self.assertIn("startPowerShell", body["data"]["stack"]["components"]["launcher"]["assets"])
         self.assertIn("sha256", body["data"]["stack"]["components"]["launcher"]["assets"]["startShell"])
         console = body["data"]["stack"]["components"]["launcher"]["features"]["analyticsConsole"]
-        self.assertFalse(console["embedded"])
+        self.assertTrue(console["embedded"])
         self.assertFalse(console["enabledByDefault"])
-        self.assertIn("predates", console["reason"])
+        self.assertEqual("-AnalyticsConsole", console["powershellOptIn"])
+        self.assertEqual("ANALYTICS_CONSOLE_ENABLED=true", console["bashOptIn"])
+        self.assertFalse(console["fapEnabledByDefault"])
 
     def test_stack_show_default_manifest_failure_falls_back_with_warning(self) -> None:
         with patch("foggy_runtime_cli.stack_cli.read_text_resource", side_effect=OSError("offline")):
@@ -2172,11 +2174,11 @@ class CliTest(unittest.TestCase):
         self.assertFalse(payload["success"])
         self.assertEqual("DEMO_ASSET_MISSING", payload["error"]["code"])
         self.assertEqual(
-            "foggy-runtime skills install foggy-ai-analysis --zip foggy-ai-analysis-skill-0.1.16.zip --replace",
+            "foggy-runtime skills install foggy-ai-analysis --zip foggy-ai-analysis-skill-0.1.17.zip --replace",
             payload["data"]["installCommand"],
         )
-        self.assertIn("foggy-ai-analysis/releases/download/v0.1.16", payload["data"]["publicZipUrl"])
-        self.assertIn("--zip foggy-ai-analysis-skill-0.1.16.zip", payload["error"]["message"])
+        self.assertIn("foggy-ai-analysis/releases/download/v0.1.17", payload["data"]["publicZipUrl"])
+        self.assertIn("--zip foggy-ai-analysis-skill-0.1.17.zip", payload["error"]["message"])
 
     def test_demo_available_query_fields_supports_date_grains(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -2477,11 +2479,11 @@ class CliTest(unittest.TestCase):
         self.assertFalse(payload["success"])
         self.assertEqual("DEMO_ASSET_MISSING", payload["error"]["code"])
         self.assertEqual(
-            "foggy-runtime skills install foggy-ai-analysis --zip foggy-ai-analysis-skill-0.1.16.zip --replace",
+            "foggy-runtime skills install foggy-ai-analysis --zip foggy-ai-analysis-skill-0.1.17.zip --replace",
             payload["data"]["installCommand"],
         )
-        self.assertIn("foggy-ai-analysis/releases/download/v0.1.16", payload["data"]["publicZipUrl"])
-        self.assertIn("--zip foggy-ai-analysis-skill-0.1.16.zip", payload["error"]["message"])
+        self.assertIn("foggy-ai-analysis/releases/download/v0.1.17", payload["data"]["publicZipUrl"])
+        self.assertIn("--zip foggy-ai-analysis-skill-0.1.17.zip", payload["error"]["message"])
         self.assertEqual([], FakeClient.calls)
 
     def test_compose_validate_reads_script_file_and_checks_capability(self) -> None:
