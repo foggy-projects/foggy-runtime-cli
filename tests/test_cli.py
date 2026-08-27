@@ -241,9 +241,9 @@ class CliTest(unittest.TestCase):
             self.assertTrue((target_dir / "references" / "public-onboarding.md").is_file())
             self.assertFalse((home / ".codex" / "skills" / "foggy-ai-analysis").exists())
             self.assertFalse((home / ".claude" / "skills" / "foggy-ai-analysis").exists())
-            self.assertEqual(str(home / ".agents" / "skills"), body["data"]["targetRoot"])
+            self.assertEqual(str((home / ".agents" / "skills").resolve()), body["data"]["targetRoot"])
             self.assertEqual("agents-skills-only", body["data"]["installPolicy"])
-            self.assertEqual(str(target_dir / "assets" / "sales-drop-demo"), body["data"]["salesDropDemoDir"])
+            self.assertEqual(str((target_dir / "assets" / "sales-drop-demo").resolve()), body["data"]["salesDropDemoDir"])
             self.assertIn("--zip foggy-ai-analysis-skill-0.1.17.zip", body["data"]["demoInstallCommand"])
             self.assertIn("foggy-ai-analysis/releases/download/v0.1.17", body["data"]["publicZipUrl"])
             self.assertIn("--workspace-root <workspace-root>", body["data"]["workspaceInstallCommand"])
@@ -708,7 +708,7 @@ class CliTest(unittest.TestCase):
             self.assertEqual("foggy-analysis-suite", body["data"]["skill"])
             self.assertEqual(["foggy-ai-analysis", "foggy-semantic-query"], [item["skill"] for item in body["data"]["installedSkills"]])
             self.assertEqual(
-                str(target_root / "foggy-ai-analysis" / "assets" / "sales-drop-demo"),
+                str((target_root / "foggy-ai-analysis" / "assets" / "sales-drop-demo").resolve()),
                 body["data"]["installedSkills"][0]["salesDropDemoDir"],
             )
             self.assertEqual("foggy-ai-analysis", body["data"]["installedSkills"][1]["companionSkill"])
@@ -2093,6 +2093,8 @@ class CliTest(unittest.TestCase):
                 code, output, error = self.run_cli(
                     ["demo", "sales-drop", "plan", "--repo-root", str(repo_root), "--port", "18066"]
                 )
+            expected_skill_dir = str(skill_dir.resolve())
+            expected_demo_dir = str(demo_dir.resolve())
 
         payload = json.loads(output)
         self.assertEqual(EXIT_OK, code)
@@ -2103,8 +2105,8 @@ class CliTest(unittest.TestCase):
         self.assertEqual("sales-drop", payload["data"]["demo"])
         self.assertEqual("http://127.0.0.1:18066", payload["data"]["baseUrl"])
         self.assertEqual("default", payload["data"]["namespace"])
-        self.assertEqual(str(skill_dir), payload["data"]["skillDir"])
-        self.assertEqual(str(demo_dir), payload["data"]["demoDir"])
+        self.assertEqual(expected_skill_dir, payload["data"]["skillDir"])
+        self.assertEqual(expected_demo_dir, payload["data"]["demoDir"])
         self.assertIn("commands", payload["data"])
 
     def test_demo_sales_drop_plan_prefers_installed_analysis_skill(self) -> None:
@@ -2121,13 +2123,15 @@ class CliTest(unittest.TestCase):
                 code, output, error = self.run_cli(
                     ["demo", "sales-drop", "plan", "--repo-root", str(repo_root)]
                 )
+            expected_skill_dir = str(installed_skill.resolve())
+            expected_demo_dir = str(installed_demo_dir.resolve())
 
         payload = json.loads(output)
         self.assertEqual(EXIT_OK, code)
         self.assertEqual("", error)
         self.assertTrue(payload["success"])
-        self.assertEqual(str(installed_skill), payload["data"]["skillDir"])
-        self.assertEqual(str(installed_demo_dir), payload["data"]["demoDir"])
+        self.assertEqual(expected_skill_dir, payload["data"]["skillDir"])
+        self.assertEqual(expected_demo_dir, payload["data"]["demoDir"])
 
     def test_demo_sales_drop_plan_accepts_unpacked_skill_dir(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -2149,17 +2153,22 @@ class CliTest(unittest.TestCase):
                     "18067",
                 ]
             )
+            expected_skill_dir = str(skill_dir.resolve())
+            expected_demo_dir = str(demo_dir.resolve())
+            expected_models_dir = str((demo_dir / "models").resolve())
+            expected_query_payload = str((demo_dir / "queries" / "basic.json").resolve())
+            expected_schema = str((demo_dir / "schema.sql").resolve())
 
         payload = json.loads(output)
         self.assertEqual(EXIT_OK, code)
         self.assertEqual("", error)
         self.assertEqual([], FakeClient.calls)
         self.assertTrue(payload["success"])
-        self.assertEqual(str(skill_dir), payload["data"]["skillDir"])
-        self.assertEqual(str(demo_dir), payload["data"]["demoDir"])
-        self.assertEqual(str(demo_dir / "models"), payload["data"]["modelsDir"])
-        self.assertEqual(str(demo_dir / "queries" / "basic.json"), payload["data"]["queryPayload"])
-        self.assertIn(str(demo_dir / "schema.sql"), payload["data"]["commands"][1]["argv"][2])
+        self.assertEqual(expected_skill_dir, payload["data"]["skillDir"])
+        self.assertEqual(expected_demo_dir, payload["data"]["demoDir"])
+        self.assertEqual(expected_models_dir, payload["data"]["modelsDir"])
+        self.assertEqual(expected_query_payload, payload["data"]["queryPayload"])
+        self.assertIn(expected_schema, payload["data"]["commands"][1]["argv"][2])
 
     def test_demo_sales_drop_plan_reports_missing_assets(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
