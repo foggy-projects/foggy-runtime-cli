@@ -5,6 +5,7 @@ clean=0
 skip_tests=0
 skip_install=0
 skip_venv=0
+no_isolation=0
 
 for arg in "$@"; do
   case "$arg" in
@@ -12,6 +13,7 @@ for arg in "$@"; do
     --skip-tests) skip_tests=1 ;;
     --skip-install) skip_install=1 ;;
     --skip-venv) skip_venv=1 ;;
+    --no-isolation) no_isolation=1 ;;
     *)
       echo "Unknown argument: $arg" >&2
       exit 2
@@ -71,7 +73,11 @@ if [[ "$skip_tests" == "0" ]]; then
   PYTHONPATH="$project_root/src${PYTHONPATH:+:$PYTHONPATH}" "$python_exe" -m pytest tests
 fi
 
-"$python_exe" -m build --sdist --wheel
+build_args=(--sdist --wheel)
+if [[ "$no_isolation" == "1" ]]; then
+  build_args+=(--no-isolation)
+fi
+"$python_exe" -m build "${build_args[@]}"
 
 artifacts=()
 while IFS= read -r artifact; do

@@ -13,6 +13,7 @@ from typing import Any, Callable, TextIO
 
 from . import __version__
 from . import analytics_cli
+from . import profiles
 from . import stack_cli
 from . import skills_cli
 from .client import RuntimeApiClient, RuntimeTransportError, path_quote
@@ -65,6 +66,7 @@ def main(
 
     parser = build_parser()
     args = parser.parse_args(effective_argv)
+    args._stdin = stdin
     if args.namespace is None and getattr(args, "default_namespace", None):
         args.namespace = args.default_namespace
 
@@ -174,6 +176,8 @@ def build_parser() -> argparse.ArgumentParser:
     capabilities.set_defaults(method="GET", path="/api/v1/capabilities", body_builder=no_body)
 
     analytics_cli.register_analytics_parser(subparsers, FoggyArgumentParser)
+
+    profiles.register_profile_parser(subparsers, FoggyArgumentParser)
 
     wait_ready = subparsers.add_parser("wait-ready")
     wait_ready.add_argument("--timeout-seconds", type=float, default=90.0)

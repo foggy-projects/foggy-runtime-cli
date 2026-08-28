@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-version="0.1.22"
+version="0.1.23"
 repo="foggy-projects/foggy-runtime-cli"
 python_exe="python"
 download_dir=""
@@ -102,11 +102,12 @@ fi
 
 echo "SHA256 verified: $asset_name"
 
-pip_args=(-m pip install --upgrade "$wheel_path")
+pip_args=(-m pip install --upgrade --no-deps --disable-pip-version-check "$wheel_path")
 if [[ "$user_install" == "1" ]]; then
   pip_args+=(--user)
 fi
 "$python_exe" "${pip_args[@]}"
 
-"$python_exe" -m foggy_runtime_cli.main --help | head -n 12
+help_output="$("$python_exe" -m foggy_runtime_cli.main --help)"
+printf '%s\n' "$help_output" | sed -n '1,12p'
 echo "foggy-runtime-cli $version installed."

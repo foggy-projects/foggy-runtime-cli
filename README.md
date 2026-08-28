@@ -6,6 +6,45 @@ Standalone CLI transport for `Foggy Runtime API v1` and the independent
 The CLI talks only to public `/api/v1/*` operations under the configured base
 URL. It does not call Java or Python engine private routes.
 
+## Opaque Onboarding Profiles
+
+`profiles` separates trusted datasource setup from an agent-visible onboarding
+session. A trusted operator creates the private profile once; DeepSeek Harness or
+another agent receives only a random profile ID, an immutable SHA-256 revision,
+the datasource name/type, namespace, and approval requirements.
+
+Private input accepts `name`, `type`, `jdbcUrl`, optional `username`, optional
+`passwordEnv`, and `namespace`. Password values are never accepted, JDBC URLs
+containing passwords are rejected, and there is deliberately no command that
+prints or resolves private connection material.
+
+```powershell
+# Run this trusted setup step outside the Harness session.
+foggy-runtime profiles create --input .\connection.private.json
+
+# Review the opaque summary. Neither command prints JDBC/username/passwordEnv.
+foggy-runtime profiles list
+foggy-runtime profiles show fop_<32-hex>
+
+# Harness can dry-run with only the ID and the reviewed revision.
+foggy-runtime --base-url http://127.0.0.1:18066 profiles apply fop_<32-hex> `
+  --approve-revision sha256:<64-hex>
+
+# Configuration and namespace binding are separately explicit mutations.
+foggy-runtime --base-url http://127.0.0.1:18066 profiles apply fop_<32-hex> `
+  --approve-revision sha256:<64-hex> --approve-configure --approve-bind
+```
+
+Profiles default to `%LOCALAPPDATA%\Foggy\runtime-cli\profiles` on Windows and
+`$XDG_CONFIG_HOME/foggy-runtime/profiles` (or `~/.config/foggy-runtime/profiles`)
+elsewhere. `FOGGY_RUNTIME_PROFILE_STORE` overrides this location for controlled
+deployments and tests. The CLI uses atomic writes, owner-only POSIX modes where
+the platform supports them, rejects symlink profile paths, and requires the exact
+stored revision for apply, replacement, and removal.
+
+Profiles are a CLI configuration and output boundary for Harness integration;
+operating-system process isolation is outside this component's scope.
+
 ## Analytics Runtime Development Lane
 
 The development line installs both `foggy-runtime` and `foggy` executable
@@ -160,7 +199,7 @@ Use foggy-runtime-cli v0.1.22, the formal foggy-ai-analysis Skill v0.1.17 releas
 Windows PowerShell from GitHub Release:
 
 ```powershell
-$version = "0.1.22"
+$version = "0.1.23"
 $download = Join-Path $env:TEMP "foggy-runtime-cli-install-$version"
 New-Item -ItemType Directory -Force -Path $download | Out-Null
 Invoke-WebRequest `
@@ -175,7 +214,7 @@ python -m pip show foggy-runtime-cli
 Linux/macOS from GitHub Release:
 
 ```bash
-version="0.1.22"
+version="0.1.23"
 download="${TMPDIR:-/tmp}/foggy-runtime-cli-install-$version"
 mkdir -p "$download"
 curl -fsSL "https://github.com/foggy-projects/foggy-runtime-cli/releases/download/v$version/install-foggy-runtime-cli.sh" -o "$download/install-foggy-runtime-cli.sh"
@@ -188,7 +227,7 @@ python -m pip show foggy-runtime-cli
 From a released wheel:
 
 ```powershell
-python -m pip install foggy_runtime_cli-0.1.22-py3-none-any.whl
+python -m pip install foggy_runtime_cli-0.1.23-py3-none-any.whl
 foggy-runtime --version
 foggy-runtime --help
 ```
@@ -266,8 +305,8 @@ manual-only.
 GitHub releases are created from tags by `.github/workflows/release.yml`:
 
 ```powershell
-git tag -a v0.1.22 -m "Release v0.1.22"
-git push origin v0.1.22
+git tag -a v0.1.23 -m "Release v0.1.23"
+git push origin v0.1.23
 ```
 
 Release assets include:

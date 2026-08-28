@@ -1,5 +1,5 @@
 param(
-    [string]$Version = "0.1.22",
+    [string]$Version = "0.1.23",
     [string]$Repo = "foggy-projects/foggy-runtime-cli",
     [string]$Python = "python",
     [string]$DownloadDir = "",
@@ -73,11 +73,19 @@ if ($actualHash -ne $expectedHash) {
 
 Write-Host "SHA256 verified: $assetName"
 
-$pipArgs = @("-m", "pip", "install", "--upgrade", $WheelPath)
+$pipArgs = @(
+    "-m", "pip", "install", "--upgrade",
+    "--no-deps", "--disable-pip-version-check",
+    $WheelPath
+)
 if ($User) {
     $pipArgs += "--user"
 }
 & $Python @pipArgs
 
-& $Python -m foggy_runtime_cli.main --help | Select-Object -First 12
+$helpOutput = & $Python -m foggy_runtime_cli.main --help
+if ($LASTEXITCODE -ne 0) {
+    throw "Installed CLI help check failed (exit=$LASTEXITCODE)"
+}
+$helpOutput | Select-Object -First 12
 Write-Host "foggy-runtime-cli $Version installed."

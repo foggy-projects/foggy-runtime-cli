@@ -2,7 +2,8 @@ param(
     [switch]$Clean,
     [switch]$SkipTests,
     [switch]$SkipInstall,
-    [switch]$SkipVenv
+    [switch]$SkipVenv,
+    [switch]$NoIsolation
 )
 
 $ErrorActionPreference = "Stop"
@@ -48,20 +49,36 @@ try {
     if (-not $SkipVenv) {
         if (-not (Test-Path $ReleaseVenv)) {
             python -m venv $ReleaseVenv
+            if ($LASTEXITCODE -ne 0) {
+                throw "Failed to create release virtual environment (exit=$LASTEXITCODE)"
+            }
         }
         $PythonExe = Join-Path $ReleaseVenv "Scripts\python.exe"
     }
 
     if (-not $SkipInstall) {
         & $PythonExe -m pip install --upgrade pip build pytest
+        if ($LASTEXITCODE -ne 0) {
+            throw "Failed to install release build dependencies (exit=$LASTEXITCODE)"
+        }
     }
 
     if (-not $SkipTests) {
         $env:PYTHONPATH = Join-Path $ProjectRoot "src"
         & $PythonExe -m pytest tests
+        if ($LASTEXITCODE -ne 0) {
+            throw "Release tests failed (exit=$LASTEXITCODE)"
+        }
     }
 
-    & $PythonExe -m build --sdist --wheel
+    $buildArgs = @("-m", "build", "--sdist", "--wheel")
+    if ($NoIsolation) {
+        $buildArgs += "--no-isolation"
+    }
+    & $PythonExe @buildArgs
+    if ($LASTEXITCODE -ne 0) {
+        throw "Release artifact build failed (exit=$LASTEXITCODE)"
+    }
 
     $files = Get-ChildItem -Path $DistDir -File |
         Where-Object { $_.Name -match '\.(whl|tar\.gz)$' } |
