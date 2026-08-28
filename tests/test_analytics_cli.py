@@ -133,15 +133,16 @@ class AnalyticsCliContractTest(unittest.TestCase):
         self.assertIsNone(FakeClient.authorization)
 
     def test_cli_operation_registry_matches_frozen_fixture_and_java_sdk_v1(self) -> None:
-        workspace = Path(__file__).resolve().parents[2]
+        project_root = Path(__file__).resolve().parents[1]
         fixture = json.loads((
-            workspace
-            / "docs/v4.1/contracts/analytics-function-v1/sdk-v1-operations.json"
+            project_root
+            / "tests/fixtures/sdk-v1-operations.json"
         ).read_text(encoding="utf-8"))
         expected = set(fixture["operations"])
 
         self.assertEqual(expected, set(ANALYTICS_SDK_V1_OPERATIONS))
 
+        workspace = project_root.parent
         java_source = (
             workspace
             / "foggy-data-mcp-bridge/foggy-analytics-function-contract/src/main/java"
