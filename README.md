@@ -347,6 +347,7 @@ foggy-runtime models refresh --model FactSalesQueryModel
 foggy-runtime models validate --models-dir ./models
 foggy-runtime query validate FactSalesQueryModel --payload query.json
 foggy-runtime query execute FactSalesQueryModel --payload -
+foggy-runtime members list FactSalesQueryModel orderStatus
 foggy-runtime query explain FactSalesQueryModel --field totalAmount --include-physical-names
 foggy-runtime query explain FactSalesQueryModel --payload query.json --include-sql
 foggy-runtime compose validate --script compose.fsscript
@@ -364,12 +365,41 @@ Query payload compatibility:
 
 ```json
 {
-  "columns": ["customerName", "customerSegment", "observationDate$month", "sum(salesDropAmount) as totalDrop"],
-  "groupBy": ["customerName", "customerSegment", "observationDate$month"]
+  "columns": ["customerName", "customerSegment", "observationDate$yearMonth", "sum(salesDropAmount) as totalDrop"],
+  "groupBy": ["customerName", "customerSegment", "observationDate$yearMonth"]
 }
 ```
 
+The date grain must be returned by `models describe`, typically from a TM self date dimension or a
+physical date dimension. The CLI does not append `$year`, `$month`, or `$yearMonth` to a plain
+`DATE` / `DATETIME` property.
+
 The CLI accepts `groupBy` string-array shorthand in query payloads and normalizes it to Runtime API v1 object items before sending the request. Raw Runtime API v1 HTTP callers that bypass the CLI should send `groupBy` as `[{"field":"customerName"}]` until the Java API adds native string-array compatibility.
+
+Static dictionary captions are a Runtime capability, not a CLI-side formatting feature. When
+`models describe <QueryModel>` exposes both `orderStatus` and `orderStatus$caption`, the CLI sends
+them unchanged and preserves the Runtime result: the raw field remains the database code and the
+caption field contains the registered label. A registered label can be sent to the Java Runtime in
+an equality/set filter on the raw field or caption field; the Runtime converts it to the field's
+typed code before SQL binding.
+
+```json
+{
+  "columns": ["orderStatus", "orderStatus$caption", "orderCount"],
+  "slice": [
+    {"field": "orderStatus", "op": "=", "value": "Awaiting pickup"}
+  ],
+  "groupBy": ["orderStatus", "orderStatus$caption"],
+  "orderBy": ["-orderCount"],
+  "limit": 20
+}
+```
+
+Validate and execute that payload normally, and enumerate its registered choices through
+`foggy-runtime members list <QueryModel> orderStatus`. Do not order by `$caption` or apply
+range/fuzzy operators to it; model a database-backed dimension when label ordering is required.
+If describe does not advertise `$caption`, do not generate it. The CLI deliberately does not keep
+a dictionary mapping or perform a second conversion.
 
 JSON output is the default and preserves the Runtime API envelope for Skill consumption.
 
