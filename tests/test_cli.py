@@ -713,6 +713,40 @@ class CliTest(unittest.TestCase):
             )
             self.assertEqual("foggy-ai-analysis", body["data"]["installedSkills"][1]["companionSkill"])
 
+    def test_skills_install_suite_prefers_canonical_release_sources(self) -> None:
+        for nested_repository in (False, True):
+            with self.subTest(nested_repository=nested_repository), tempfile.TemporaryDirectory() as temp_dir:
+                root = Path(temp_dir)
+                home = root / "home"
+                workspace = root / "workspace"
+                repository = workspace / "foggy-ai-analysis" if nested_repository else workspace
+                sources = {
+                    "foggy-ai-analysis": repository / "locales" / "en",
+                    "foggy-semantic-query": repository / "skills" / "foggy-semantic-query",
+                }
+                for name, source in sources.items():
+                    (source / "references").mkdir(parents=True)
+                    (source / "SKILL.md").write_text(f"---\nname: {name}\n---\n", encoding="utf-8")
+                    (source / "references" / "source-marker.md").write_text("canonical\n", encoding="utf-8")
+                    stale = workspace / ".codex" / "skills" / name
+                    stale.mkdir(parents=True)
+                    (stale / "SKILL.md").write_text(f"---\nname: {name}\n---\nstale\n", encoding="utf-8")
+
+                with patch("foggy_runtime_cli.skills_cli.Path.home", return_value=home):
+                    code, output, error = self.run_cli(
+                        ["skills", "install", "foggy-analysis-suite", "--workspace-root", str(workspace)]
+                    )
+
+                self.assertEqual(EXIT_OK, code, output)
+                self.assertEqual("", error)
+                self.assertTrue(json.loads(output)["success"])
+                for name, source in sources.items():
+                    installed = home / ".agents" / "skills" / name
+                    self.assertEqual((source / "SKILL.md").read_bytes(), (installed / "SKILL.md").read_bytes())
+                    self.assertEqual("canonical\n", (installed / "references" / "source-marker.md").read_text(encoding="utf-8"))
+                self.assertFalse((home / ".codex").exists())
+                self.assertFalse((home / ".claude").exists())
+
     def test_wait_ready_succeeds_after_transport_error(self) -> None:
         from foggy_runtime_cli.client import RuntimeTransportError
 

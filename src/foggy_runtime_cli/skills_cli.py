@@ -444,6 +444,8 @@ def resolve_local_skill_source_dir(skill_name: str, workspace_root: Path, requir
         ]
     elif skill_name == "foggy-semantic-query":
         candidates = [
+            workspace_root / "foggy-ai-analysis" / "skills" / "foggy-semantic-query",
+            workspace_root / "skills" / "foggy-semantic-query",
             workspace_root / ".codex" / "skills" / "foggy-semantic-query",
             workspace_root / "foggy-semantic-query",
         ]

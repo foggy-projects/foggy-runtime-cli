@@ -277,6 +277,8 @@ foggy-runtime skills install foggy-analysis-suite --workspace-root D:\foggy-proj
 
 `foggy-analysis-suite` installs both `foggy-ai-analysis` and `foggy-semantic-query`; without `--workspace-root`, it downloads both release zips from the stable stack manifest.
 
+For source maintenance, `--workspace-root` also accepts the independent `foggy-ai-analysis` checkout or its parent workspace. The installer prefers `locales/en` and `skills/foggy-semantic-query` in that checkout over legacy `.codex/skills` copies. Edit and commit those canonical Skill sources; the CLI contains installation logic, not another copy of the Skill instructions. Source-only changes do not require rebuilding packages or advancing the stable stack.
+
 ## Release Packaging
 
 Build local release artifacts:
