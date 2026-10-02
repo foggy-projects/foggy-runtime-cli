@@ -114,6 +114,8 @@ def _open_request(request: Request, timeout: float) -> Any:
 def is_data_plane_path(method: str, path: str) -> bool:
     normalized = "/" + path.lstrip("/")
     upper_method = method.upper()
+    if normalized in ("/mcp/analyst/rpc", "/mcp/analyst", "/mcp/business/rpc", "/mcp/business"):
+        return upper_method == "POST"
     if normalized == "/api/v1/models":
         return upper_method == "GET"
     if normalized.startswith("/api/v1/models/") and normalized.endswith("/describe"):

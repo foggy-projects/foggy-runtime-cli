@@ -43,33 +43,6 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           tag="${GITHUB_REF_NAME}"
-          cat > release-notes.md <<EOF
-          Foggy Runtime CLI release ${tag}.
-
-          Assets include the wheel, sdist, install scripts, SHA256SUMS, and release-manifest.json.
-
-          Adds `foggy-runtime query explain` for versioned DEFINITION and RECOMPILED semantic-query evidence, including optional SQL and physical-name disclosure flags. Existing query validate/execute and model commands keep their protocols unchanged.
-
-          Adds an opaque data-plane `--authorization` / `FOGGY_RUNTIME_AUTHORIZATION` option. It is sent only to model/query/member/Compose routes, stripped on cross-origin redirects, and redacted from echoed responses.
-
-          Runtime APIs using securityMode=auth-code require the shared runtime code for protected management operations. Pass it with global --auth-code or FOGGY_RUNTIME_API_AUTH_CODE; the CLI sends X-Foggy-Runtime-Code.
-
-          Public Foggy AI analysis onboarding uses three release inputs:
-
-          1. Install this CLI release.
-          2. Download the paired foggy-ai-analysis and foggy-semantic-query Skills v0.1.17 from https://github.com/foggy-projects/foggy-ai-analysis/releases/tag/v0.1.17.
-          3. Download Foggy Runtime Launcher foggy-runtime-launcher-v0.1.18 from https://github.com/foggy-projects/foggy-data-mcp-bridge/releases/tag/foggy-runtime-launcher-v0.1.18.
-
-          The sales-drop public demo should run with the Java runtime default SQLite datasource and:
-
-          \`\`\`powershell
-          foggy-runtime skills install foggy-ai-analysis --zip .\foggy-ai-analysis-skill-0.1.17.zip --replace
-          foggy-runtime skills install foggy-semantic-query --zip .\foggy-semantic-query-skill-0.1.17.zip --replace
-          foggy-runtime --base-url http://127.0.0.1:18066 demo sales-drop replay --evidence-dir <evidence> --sqlite-path <runtime-default-sqlite> --use-default-datasource
-          \`\`\`
-
-          Foggy Runtime Launcher releases are dev/test-only. Production permission, auth, RBAC, audit, and governance remain a later phase.
-          EOF
           gh release create "$tag" \
             dist/*.whl \
             dist/*.tar.gz \
@@ -78,4 +51,4 @@ jobs:
             dist/install-foggy-runtime-cli.ps1 \
             dist/install-foggy-runtime-cli.sh \
             --title "Foggy Runtime CLI ${tag}" \
-            --notes-file release-notes.md
+            --notes-file RELEASE_NOTES.md

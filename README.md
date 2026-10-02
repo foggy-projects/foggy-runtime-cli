@@ -3,8 +3,9 @@
 Standalone CLI transport for `Foggy Runtime API v1` and the independent
 `Analytics Runtime API v1`.
 
-The CLI talks only to public `/api/v1/*` operations under the configured base
-URL. It does not call Java or Python engine private routes.
+The CLI talks to public `/api/v1/*` operations under the configured base URL.
+`query open-in-viewer` uses the public MCP endpoint on the same server. It does
+not call Java or Python engine private routes.
 
 ## Opaque Onboarding Profiles
 
@@ -99,18 +100,19 @@ ANALYTICS_CONSOLE_ENABLED=true ./start-foggy-runtime.sh
 Then verify Runtime API readiness and open `/analytics-console/`. FAP is an optional,
 separately managed integration and remains disabled; the launcher never creates FAP
 providers, Skills, Capabilities, Functions, credentials, or workspace bindings. The
-CLI built-in offline stack and the stable online stack both pin launcher `0.1.18`. Its manifest
-reports the embedded Console and Analytics Runtime API, keeps both disabled by default, and exposes
-the explicit Console opt-in shown above. FAP remains disabled and host-managed.
+`stack show` resolves the published stable manifest; `stack show --offline-stack`
+uses the verified release versions bundled with this CLI. Check the selected
+launcher's manifest for embedded Console and Analytics Runtime API support and
+keep both disabled unless explicitly needed. FAP remains disabled and host-managed.
 
 ## Public AI Analysis Demo Quick Start
 
-Current validated public onboarding baseline:
+Public release inputs (the online stable manifest may move independently):
 
-- CLI: `v0.1.22`
-- `foggy-ai-analysis` Skill: `v0.1.17`
-- optional `foggy-semantic-query` Skill: `v0.1.17`
-- Foggy Runtime Launcher: `foggy-runtime-launcher-v0.1.18`
+- CLI: `v0.1.24`
+- `foggy-ai-analysis` Skill: `v0.1.18`
+- optional `foggy-semantic-query` Skill: `v0.1.18`
+- Foggy Runtime Launcher: `foggy-runtime-launcher-v0.1.24`
 - Stable stack manifest: `https://raw.githubusercontent.com/foggy-projects/foggy-ai-analysis/main/stack/stable.json`
 - Runtime URL: `http://127.0.0.1:18066`
 - Namespace: `salesdrop`
@@ -184,14 +186,14 @@ question-bank total=12 executable=11 pass=11 fail=0 needs-clarification=1
 
 Current boundary: `--use-default-datasource` is still the public sales-drop replay default because that example owns and reseeds a local SQLite file. For user business data, keep the user datasource separate from sales-drop demo data: register a Runtime API-managed datasource, bind it to the target namespace, validate the bundle, refresh, describe, and run a query smoke against that namespace. Use `datasources diagnostics` to record registry paths and namespace bindings before restart evidence. The launcher is dev/test-only and reports `securityMode=none-dev-test-only`; production permission, auth, RBAC, audit, and governance are deferred.
 
-For `foggy-ai-analysis` Skill v0.1.17, the replay must reseed the Java runtime default SQLite file with the Skill-bundled `schema.sql` and `data.sql`. Reusing an older `sales_drop_daily` table can leave out customer dimension columns required by the current TM/QM.
+For `foggy-ai-analysis` Skill v0.1.18, the replay must reseed the Java runtime default SQLite file with the Skill-bundled `schema.sql` and `data.sql`. Reusing an older `sales_drop_daily` table can leave out customer dimension columns required by the current TM/QM.
 
 For Runtime API management operations against runtimes configured with `securityMode=auth-code`, use CLI `v0.1.6` or later and pass `--auth-code` or `FOGGY_RUNTIME_API_AUTH_CODE`. This auth-code path is separate from the current public sales-drop demo baseline above.
 
 Copyable first prompt for an LLM session:
 
 ```text
-Use foggy-runtime-cli v0.1.22, the formal foggy-ai-analysis Skill v0.1.17 release assets, and Foggy Runtime Launcher `foggy-runtime-launcher-v0.1.18`. Install the Skill into ~/.agents/skills/foggy-ai-analysis, start the Java runtime on http://127.0.0.1:18066 with a SQLite default datasource, then run foggy-runtime demo sales-drop replay with --use-default-datasource and the same SQLite path so the bundled schema.sql/data.sql reseeds the runtime default SQLite file. For user business data, use a separate Runtime API-managed datasource and namespace binding instead of mixing it with the sales-drop SQLite file. Record commands, checksums, runtime URL, namespace, datasource mode, diagnostics, question-bank totals, evidence files, failures, and fixes. Production permission/auth/RBAC/audit/governance are out of scope for this demo.
+Use foggy-runtime-cli v0.1.24, the formal foggy-ai-analysis Skill v0.1.18 release assets, and Foggy Runtime Launcher `foggy-runtime-launcher-v0.1.24`. Install the Skill into ~/.agents/skills/foggy-ai-analysis, start the Java runtime on http://127.0.0.1:18066 with a SQLite default datasource, then run foggy-runtime demo sales-drop replay with --use-default-datasource and the same SQLite path so the bundled schema.sql/data.sql reseeds the runtime default SQLite file. For user business data, use a separate Runtime API-managed datasource and namespace binding instead of mixing it with the sales-drop SQLite file. Record commands, checksums, runtime URL, namespace, datasource mode, diagnostics, question-bank totals, evidence files, failures, and fixes. Production permission/auth/RBAC/audit/governance are out of scope for this demo.
 ```
 
 ## Installation
@@ -199,7 +201,7 @@ Use foggy-runtime-cli v0.1.22, the formal foggy-ai-analysis Skill v0.1.17 releas
 Windows PowerShell from GitHub Release:
 
 ```powershell
-$version = "0.1.23"
+$version = "0.1.24"
 $download = Join-Path $env:TEMP "foggy-runtime-cli-install-$version"
 New-Item -ItemType Directory -Force -Path $download | Out-Null
 Invoke-WebRequest `
@@ -214,7 +216,7 @@ python -m pip show foggy-runtime-cli
 Linux/macOS from GitHub Release:
 
 ```bash
-version="0.1.23"
+version="0.1.24"
 download="${TMPDIR:-/tmp}/foggy-runtime-cli-install-$version"
 mkdir -p "$download"
 curl -fsSL "https://github.com/foggy-projects/foggy-runtime-cli/releases/download/v$version/install-foggy-runtime-cli.sh" -o "$download/install-foggy-runtime-cli.sh"
@@ -227,7 +229,7 @@ python -m pip show foggy-runtime-cli
 From a released wheel:
 
 ```powershell
-python -m pip install foggy_runtime_cli-0.1.23-py3-none-any.whl
+python -m pip install foggy_runtime_cli-0.1.24-py3-none-any.whl
 foggy-runtime --version
 foggy-runtime --help
 ```
@@ -264,7 +266,7 @@ foggy-runtime skills install foggy-semantic-query --replace
 Pinned release zip install:
 
 ```powershell
-foggy-runtime skills install foggy-ai-analysis --zip .\foggy-ai-analysis-skill-0.1.17.zip --replace
+foggy-runtime skills install foggy-ai-analysis --zip .\foggy-ai-analysis-skill-0.1.18.zip --replace
 ```
 
 Supported local workspace installs:
@@ -307,8 +309,8 @@ manual-only.
 GitHub releases are created from tags by `.github/workflows/release.yml`:
 
 ```powershell
-git tag -a v0.1.23 -m "Release v0.1.23"
-git push origin v0.1.23
+git tag -a v0.1.24 -m "Release v0.1.24"
+git push origin v0.1.24
 ```
 
 Release assets include:
@@ -411,7 +413,38 @@ The CLI is backend-neutral and does not select Java or Python. `--base-url` alwa
 
 When the connected Runtime API reports `securityMode=auth-code`, pass the shared runtime code with global `--auth-code <code>` or `FOGGY_RUNTIME_API_AUTH_CODE`. The CLI sends it as `X-Foggy-Runtime-Code`, which is required for protected management operations such as bundle add/update/remove, datasource add/test/bind, resources save, models validate, and models refresh. Runtimes using `none-dev-test-only` do not require this option.
 
-Data-plane model permissions use a separate optional credential. Pass the complete opaque header value with global `--authorization <value>` or `FOGGY_RUNTIME_AUTHORIZATION`; the CLI sends it unchanged as `Authorization` only to model list/describe, query, Compose, and dimension-member paths. Cross-origin redirects do not forward it, and echoed values are redacted from responses and transport errors.
+Data-plane model permissions use a separate optional credential. Pass the complete opaque header value with global `--authorization <value>` or `FOGGY_RUNTIME_AUTHORIZATION`; the CLI sends it unchanged as `Authorization` only to model list/describe, query, Compose, dimension-member paths, and POST requests to the supported analyst/business MCP endpoints. Redirects do not forward this header, and echoed values are redacted from responses and transport errors.
+
+### Open a data view
+
+`query open-in-viewer` discovers `dataset.open_in_viewer` through `tools/list`
+and calls it with the query DSL. Use the Authorization header already configured
+for the MCP service, supplied securely through `FOGGY_RUNTIME_AUTHORIZATION`,
+and its namespace. No separate viewer username or password is required.
+
+```powershell
+foggy-runtime --base-url http://127.0.0.1:18066 --namespace demo `
+  query open-in-viewer DemoWaybillQueryModel --payload .\by-station.json `
+  --title "Freight by station"
+```
+
+The default MCP path is `/mcp/analyst/rpc`. Select the configured endpoint with
+`--mcp-path` when needed; `/mcp/analyst`, `/mcp/business/rpc`, and `/mcp/business`
+are also supported. The base URL can include a server context path. An endpoint
+that does not advertise the viewer tool fails with exit code 3 before signing a
+link. Authorization is not added to the tool arguments.
+
+The payload requires `columns` and a nonempty detail `slice`. Aggregate filters
+stay in `having`; the CLI does not convert detail filters or change the model's
+query semantics. JSON output preserves the server's `viewerUrl`,
+`viewerLinkExpiresAt`, `expiresAt`, and `queryExpiresAt` when returned. Use global
+`--output pretty` to print only the link, then open it in a browser.
+
+Link lifetime and browser-session lifetime are separate configurable server
+policies. The CLI does not fabricate links or pass a TTL override. A null link
+expiry is preserved when the server is configured for permanent links; session
+expiry is still enforced by the server. Treat generated links as private access
+links when recording demonstrations or saving output.
 
 `query explain` is an evidence-only command for requests that explicitly ask how a result was produced, how a field or metric maps from QM to TM/physical SQL, or how permissions and pre-aggregation affect a query. Omit `--payload` for `DEFINITION`; provide a semantic query payload for `RECOMPILED`. It does not return business result rows and must not replace ordinary queries, model discovery, or semantic loading.
 
@@ -508,7 +541,7 @@ foggy-runtime --base-url http://127.0.0.1:18066 demo sales-drop replay `
 For the public sales-drop replay, use `--use-default-datasource` and start Java with the same SQLite file:
 
 ```powershell
-java -Dfile.encoding=UTF-8 -jar foggy-runtime-launcher-0.1.18.jar `
+java -Dfile.encoding=UTF-8 -jar foggy-runtime-launcher-0.1.24.jar `
   --server.port=18066 `
   --spring.profiles.active=lite `
   --foggy.runtime-api.enabled=true `

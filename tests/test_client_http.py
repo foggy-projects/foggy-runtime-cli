@@ -178,6 +178,16 @@ class RuntimeApiClientHttpTest(unittest.TestCase):
                 path,
             )
 
+    def test_mcp_viewer_paths_receive_opaque_authorization_only_for_post(self) -> None:
+        client = RuntimeApiClient(self.base_url, authorization="opaque-mcp-value", timeout=5)
+        for path in ("/mcp/analyst/rpc", "/mcp/analyst", "/mcp/business/rpc", "/mcp/business"):
+            client.request("POST", path, {"jsonrpc": "2.0", "method": "tools/list"})
+            self.assertEqual("opaque-mcp-value", CapturingHandler.captured["authorization"])
+        client.request("GET", "/mcp/analyst/rpc")
+        self.assertIsNone(CapturingHandler.captured["authorization"])
+        client.request("POST", "/mcp/admin/rpc", {})
+        self.assertIsNone(CapturingHandler.captured["authorization"])
+
     def test_cross_origin_redirect_does_not_forward_credentials(self) -> None:
         redirect_server = ThreadingHTTPServer(("127.0.0.1", 0), RedirectingHandler)
         RedirectingHandler.target_url = (

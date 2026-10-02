@@ -18,7 +18,7 @@ DEFAULT_STACK_MANIFEST_URL = (
     "https://raw.githubusercontent.com/foggy-projects/foggy-ai-analysis/main/stack/stable.json"
 )
 STACK_MANIFEST_ENV = "FOGGY_STACK_MANIFEST_URL"
-ANALYSIS_SKILL_RELEASE_VERSION = "0.1.17"
+ANALYSIS_SKILL_RELEASE_VERSION = "0.1.18"
 ANALYSIS_SKILL_RELEASE_ZIP = (
     f"foggy-ai-analysis-skill-{ANALYSIS_SKILL_RELEASE_VERSION}.zip"
 )
@@ -59,7 +59,7 @@ def default_stack_manifest() -> dict[str, Any]:
         "https://github.com/foggy-projects/foggy-ai-analysis/releases/download/"
         f"v{ANALYSIS_SKILL_RELEASE_VERSION}"
     )
-    launcher_version = "0.1.18"
+    launcher_version = "0.1.24"
     launcher_tag = f"foggy-runtime-launcher-v{launcher_version}"
     launcher_base = "https://github.com/foggy-projects/foggy-data-mcp-bridge/releases/download/" + launcher_tag
     cli_tag = f"v{__version__}"
@@ -110,32 +110,32 @@ def default_stack_manifest() -> dict[str, Any]:
                     "jar": {
                         "file": f"foggy-runtime-launcher-{launcher_version}.jar",
                         "url": launcher_base + f"/foggy-runtime-launcher-{launcher_version}.jar",
-                        "sha256": "2953d2fab39208b3fffefed033b34ec6f59da851920b533047a1d0909a1de049",
+                        "sha256": "fd7b45657853bc2d56c4d51143681d90a644bb848c434f767025a1fdda0a9dac",
                     },
                     "startPowerShell": {
                         "file": "start-foggy-runtime.ps1",
                         "url": launcher_base + "/start-foggy-runtime.ps1",
-                        "sha256": "b54f2f144cfdc38afcc3e9167d0700248f476c93adb3e9d95431490430f7b549",
+                        "sha256": "d89a81cc57558578d93d337f7604e1726106692e1ba02bbe456dd689f16701b3",
                     },
                     "startShell": {
                         "file": "start-foggy-runtime.sh",
                         "url": launcher_base + "/start-foggy-runtime.sh",
-                        "sha256": "e801cc340bf0842e29045e5e24798921864114846b0e1aaff30640845c8f37d0",
+                        "sha256": "4216bc1eeec3f29fd70fe43d756d4b0fa37501cf85a27633ad175ca6df603168",
                     },
                     "readme": {
                         "file": "README-foggy-runtime-launcher.md",
                         "url": launcher_base + "/README-foggy-runtime-launcher.md",
-                        "sha256": "0202546c5221cbb9343cf7367ceb20bff785fd85c2ba77cd0dac5395f6362674",
+                        "sha256": "fb4d4d16ba36609754bd62f8d47ee818514b9326c7f332da42d10980cd8e4d49",
                     },
                     "checksums": {
                         "file": "SHA256SUMS",
                         "url": launcher_base + "/SHA256SUMS",
-                        "sha256": "26f65a7112c115ccd19c6f80336b4335ab7773d54841376aa81504d1c3fcd21f",
+                        "sha256": "436227fa97aa52527d8490f15246adbe6b4d2f8b4a16f394af6efec83225a09c",
                     },
                     "manifest": {
                         "file": "runtime-launcher-manifest.json",
                         "url": launcher_base + "/runtime-launcher-manifest.json",
-                        "sha256": "0065de9c516471b936927a0b13ed1b9380c484437352b2e589c5171932427326",
+                        "sha256": "c6a9a6d36898d5e3c7e4b241e68d7b8955a3cda30cf8e1131c4cae8744e467ad",
                     },
                 },
             },
@@ -145,24 +145,24 @@ def default_stack_manifest() -> dict[str, Any]:
                     "recommendedVersion": ANALYSIS_SKILL_RELEASE_VERSION,
                     "tag": f"v{ANALYSIS_SKILL_RELEASE_VERSION}",
                     "language": "en",
-                    "minCliVersion": "0.1.21",
+                    "minCliVersion": "0.1.23",
                     "releaseUrl": f"https://github.com/foggy-projects/foggy-ai-analysis/releases/tag/v{ANALYSIS_SKILL_RELEASE_VERSION}",
                     "zip": {
                         "file": ANALYSIS_SKILL_RELEASE_ZIP,
                         "url": ANALYSIS_SKILL_RELEASE_ZIP_URL,
-                        "sha256": "2c5a10090befc38dd2cf8c3de5121d19c28682ca9c0fe72daf778d315c56c7ff",
+                        "sha256": "93d7bb8812e91a7f85040fe14ce40a3e0657cb2fed07ddfeb9c6f28aca9e2925",
                     },
                     "manifest": {
                         "file": f"foggy-ai-analysis-skill-{ANALYSIS_SKILL_RELEASE_VERSION}-manifest.json",
                         "url": skill_release_base
                         + f"/foggy-ai-analysis-skill-{ANALYSIS_SKILL_RELEASE_VERSION}-manifest.json",
-                        "sha256": "094b1401ff384f011ef80446dd639d8afb2585aa01d7a7ba49d39cb2968ae8bf",
+                        "sha256": "c6e3ae9d9ab17d8fd05fde9b94bba25577662f7edd862b099429e24244d22739",
                     },
                     "checksums": {
                         "file": f"foggy-ai-analysis-skill-{ANALYSIS_SKILL_RELEASE_VERSION}-SHA256SUMS",
                         "url": skill_release_base
                         + f"/foggy-ai-analysis-skill-{ANALYSIS_SKILL_RELEASE_VERSION}-SHA256SUMS",
-                        "sha256": "18804088cd7da7af6bbf70d658cb0d6a5a31e765470ed673dfd274f1789db240",
+                        "sha256": "10b4c97e30201d63fa1fb9773e9a540827b92b495369403deb12b9ab67c69846",
                     },
                 },
                 SEMANTIC_QUERY_SKILL: {
@@ -170,25 +170,25 @@ def default_stack_manifest() -> dict[str, Any]:
                     "recommendedVersion": ANALYSIS_SKILL_RELEASE_VERSION,
                     "tag": f"v{ANALYSIS_SKILL_RELEASE_VERSION}",
                     "language": "en",
-                    "minCliVersion": "0.1.21",
+                    "minCliVersion": "0.1.23",
                     "releaseUrl": f"https://github.com/foggy-projects/foggy-ai-analysis/releases/tag/v{ANALYSIS_SKILL_RELEASE_VERSION}",
                     "zip": {
                         "file": f"foggy-semantic-query-skill-{ANALYSIS_SKILL_RELEASE_VERSION}.zip",
                         "url": skill_release_base
                         + f"/foggy-semantic-query-skill-{ANALYSIS_SKILL_RELEASE_VERSION}.zip",
-                        "sha256": "2a9b38640816617c0ab336704471a662e1a218b7b8cf482b54b8fcccbba51ad1",
+                        "sha256": "828aa8517385ea7c4956906834d3bea918f56de6e1d2df7ff0779dc31f7f7fb2",
                     },
                     "manifest": {
                         "file": f"foggy-semantic-query-skill-{ANALYSIS_SKILL_RELEASE_VERSION}-manifest.json",
                         "url": skill_release_base
                         + f"/foggy-semantic-query-skill-{ANALYSIS_SKILL_RELEASE_VERSION}-manifest.json",
-                        "sha256": "56cdd47764fb052100132dbff55e5e67fa1cc79b9bd7548208c6247a476ae72d",
+                        "sha256": "0348c0786b72c3ea39a5e091ef494559f2fd48a625bd41796fc1b0f6eba82400",
                     },
                     "checksums": {
                         "file": f"foggy-semantic-query-skill-{ANALYSIS_SKILL_RELEASE_VERSION}-SHA256SUMS",
                         "url": skill_release_base
                         + f"/foggy-semantic-query-skill-{ANALYSIS_SKILL_RELEASE_VERSION}-SHA256SUMS",
-                        "sha256": "34ff674f69daa51cc5afea9e58980d2b6fb92ff55a47872c1d08d1a0a7e549f4",
+                        "sha256": "9fdba41edcb39e07f199b3347191e025a4ade4b535827842f861ffa42f4da9cc",
                     },
                 },
             },

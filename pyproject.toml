@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "foggy-runtime-cli"
-version = "0.1.23"
+version = "0.1.24"
 description = "Standalone CLI for Foggy Runtime API v1"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -41,6 +41,7 @@ packages = ["src/foggy_runtime_cli"]
 [tool.hatch.build.targets.sdist]
 include = [
     "/README.md",
+    "/RELEASE_NOTES.md",
     "/LICENSE",
     "/pyproject.toml",
     "/src",

@@ -203,7 +203,7 @@ class CliTest(unittest.TestCase):
             (
                 ["demo", "sales-drop", "-help"],
                 [
-                    "foggy-runtime skills install foggy-ai-analysis --zip foggy-ai-analysis-skill-0.1.17.zip --replace",
+                    "foggy-runtime skills install foggy-ai-analysis --zip foggy-ai-analysis-skill-0.1.18.zip --replace",
                     "~/.agents/skills/foggy-ai-analysis",
                 ],
             ),
@@ -244,8 +244,8 @@ class CliTest(unittest.TestCase):
             self.assertEqual(str((home / ".agents" / "skills").resolve()), body["data"]["targetRoot"])
             self.assertEqual("agents-skills-only", body["data"]["installPolicy"])
             self.assertEqual(str((target_dir / "assets" / "sales-drop-demo").resolve()), body["data"]["salesDropDemoDir"])
-            self.assertIn("--zip foggy-ai-analysis-skill-0.1.17.zip", body["data"]["demoInstallCommand"])
-            self.assertIn("foggy-ai-analysis/releases/download/v0.1.17", body["data"]["publicZipUrl"])
+            self.assertIn("--zip foggy-ai-analysis-skill-0.1.18.zip", body["data"]["demoInstallCommand"])
+            self.assertIn("foggy-ai-analysis/releases/download/v0.1.18", body["data"]["publicZipUrl"])
             self.assertIn("--workspace-root <workspace-root>", body["data"]["workspaceInstallCommand"])
 
     def test_stack_show_offline_returns_builtin_fallback(self) -> None:
@@ -255,9 +255,9 @@ class CliTest(unittest.TestCase):
         self.assertEqual(EXIT_OK, code)
         self.assertEqual("", error)
         self.assertEqual("builtin:fallback", body["data"]["stackManifestSource"])
-        self.assertEqual("0.1.17", body["data"]["stack"]["components"]["skills"]["foggy-ai-analysis"]["recommendedVersion"])
+        self.assertEqual("0.1.18", body["data"]["stack"]["components"]["skills"]["foggy-ai-analysis"]["recommendedVersion"])
         self.assertEqual(
-            "foggy-runtime-launcher-v0.1.18",
+            "foggy-runtime-launcher-v0.1.24",
             body["data"]["stack"]["components"]["launcher"]["recommendedTag"],
         )
         self.assertIn("startPowerShell", body["data"]["stack"]["components"]["launcher"]["assets"])
@@ -2217,11 +2217,11 @@ class CliTest(unittest.TestCase):
         self.assertFalse(payload["success"])
         self.assertEqual("DEMO_ASSET_MISSING", payload["error"]["code"])
         self.assertEqual(
-            "foggy-runtime skills install foggy-ai-analysis --zip foggy-ai-analysis-skill-0.1.17.zip --replace",
+            "foggy-runtime skills install foggy-ai-analysis --zip foggy-ai-analysis-skill-0.1.18.zip --replace",
             payload["data"]["installCommand"],
         )
-        self.assertIn("foggy-ai-analysis/releases/download/v0.1.17", payload["data"]["publicZipUrl"])
-        self.assertIn("--zip foggy-ai-analysis-skill-0.1.17.zip", payload["error"]["message"])
+        self.assertIn("foggy-ai-analysis/releases/download/v0.1.18", payload["data"]["publicZipUrl"])
+        self.assertIn("--zip foggy-ai-analysis-skill-0.1.18.zip", payload["error"]["message"])
 
     def test_demo_available_query_fields_supports_date_grains(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -2522,11 +2522,11 @@ class CliTest(unittest.TestCase):
         self.assertFalse(payload["success"])
         self.assertEqual("DEMO_ASSET_MISSING", payload["error"]["code"])
         self.assertEqual(
-            "foggy-runtime skills install foggy-ai-analysis --zip foggy-ai-analysis-skill-0.1.17.zip --replace",
+            "foggy-runtime skills install foggy-ai-analysis --zip foggy-ai-analysis-skill-0.1.18.zip --replace",
             payload["data"]["installCommand"],
         )
-        self.assertIn("foggy-ai-analysis/releases/download/v0.1.17", payload["data"]["publicZipUrl"])
-        self.assertIn("--zip foggy-ai-analysis-skill-0.1.17.zip", payload["error"]["message"])
+        self.assertIn("foggy-ai-analysis/releases/download/v0.1.18", payload["data"]["publicZipUrl"])
+        self.assertIn("--zip foggy-ai-analysis-skill-0.1.18.zip", payload["error"]["message"])
         self.assertEqual([], FakeClient.calls)
 
     def test_compose_validate_reads_script_file_and_checks_capability(self) -> None:

@@ -16,6 +16,7 @@ from . import analytics_cli
 from . import profiles
 from . import stack_cli
 from . import skills_cli
+from . import viewer_cli
 from .client import RuntimeApiClient, RuntimeTransportError, path_quote
 from .input_utils import read_json_payload
 
@@ -404,6 +405,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     query = subparsers.add_parser("query")
     query_commands = query.add_subparsers(dest="query_command", required=True)
+    viewer_cli.register_query_command(query_commands)
 
     query_validate = query_commands.add_parser("validate")
     query_validate.add_argument("model")
@@ -2283,6 +2285,8 @@ def pretty_response(response: dict[str, Any]) -> str:
 
     data = response.get("data")
     if isinstance(data, dict):
+        if isinstance(data.get("viewerUrl"), str):
+            return data["viewerUrl"]
         if "models" in data and isinstance(data["models"], list):
             return "\n".join(str(item) for item in data["models"])
         if "capabilities" in data and isinstance(data["capabilities"], dict):

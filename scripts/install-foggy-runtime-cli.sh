@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-version="0.1.23"
+version="0.1.24"
 repo="foggy-projects/foggy-runtime-cli"
 python_exe="python"
 download_dir=""
