@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import base64
+import binascii
 import json
 from dataclasses import dataclass
 from typing import Any
@@ -161,10 +163,30 @@ def _redact_value(value: Any, *credentials: str | None) -> Any:
     if isinstance(value, str):
         return _redact_text(value, *credentials)
     if isinstance(value, dict):
+        # PNG data is opaque binary content. Replacing a coincidental short
+        # credential in its base64 representation would corrupt the image.
+        # Only bounded, verified inline PNGs receive this narrow exception;
+        # malformed image data and every other response field stay redacted.
+        png_data = (
+            value.get("mimeType") == "image/png"
+            and value.get("type") in (None, "image")
+            and _is_bounded_png_base64(value.get("data"))
+        )
         return {
-            key: _redact_value(item, *credentials)
+            key: item if key == "data" and png_data else _redact_value(item, *credentials)
             for key, item in value.items()
         }
     if isinstance(value, list):
         return [_redact_value(item, *credentials) for item in value]
     return value
+
+
+def _is_bounded_png_base64(value: Any) -> bool:
+    maximum_bytes = 8 * 1024 * 1024
+    if not isinstance(value, str) or len(value) > ((maximum_bytes + 2) // 3) * 4:
+        return False
+    try:
+        decoded = base64.b64decode(value, validate=True)
+    except (binascii.Error, ValueError):
+        return False
+    return len(decoded) <= maximum_bytes and decoded.startswith(b"\x89PNG\r\n\x1a\n")

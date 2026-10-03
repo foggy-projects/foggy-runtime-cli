@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import base64
 import json
+import struct
 import threading
 import unittest
+import zlib
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 from unittest.mock import patch
@@ -279,6 +282,40 @@ class RuntimeApiClientHttpTest(unittest.TestCase):
         self.assertNotIn("runtime-secret", str(raised.exception))
         self.assertNotIn("opaque-secret", str(raised.exception))
         self.assertIn("[REDACTED]", str(raised.exception))
+
+    def test_short_credential_does_not_corrupt_verified_native_or_structured_png(self) -> None:
+        original = base64.b64decode(
+            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGMwav72HwAFQQKriSbhRwAAAABJRU5ErkJggg=="
+        )
+        text = b"note\x00"
+        # Add a valid Latin-1 tEXt chunk with bytes whose base64 contains 'abc'.
+        text += b" " * (-(len(original) - 12 + 8 + len(text)) % 3) + b"i\xb7 "
+        chunk = b"tEXt" + text
+        png = original[:-12] + struct.pack(">I", len(text)) + chunk + struct.pack(">I", zlib.crc32(chunk)) + original[-12:]
+        encoded = base64.b64encode(png).decode("ascii")
+        self.assertIn("abc", encoded)
+        CapturingHandler.response_body = {"result": {
+            "content": [{"type": "image", "mimeType": "image/png", "data": encoded},
+                        {"type": "text", "text": "Echo abc"}],
+            "structuredContent": {"image": {"mimeType": "image/png", "data": encoded}, "token": "abc"},
+        }}
+        response = RuntimeApiClient(self.base_url, auth_code="abc", timeout=5).request(
+            "POST", "/mcp/analyst/rpc", {"method": "tools/call"})
+        self.assertEqual(encoded, response["result"]["content"][0]["data"])
+        self.assertEqual(encoded, response["result"]["structuredContent"]["image"]["data"])
+        self.assertEqual("Echo [REDACTED]", response["result"]["content"][1]["text"])
+        self.assertEqual("[REDACTED]", response["result"]["structuredContent"]["token"])
+
+    def test_disguised_or_malformed_png_data_still_redacts_credentials(self) -> None:
+        for image in ({"type": "image", "mimeType": "image/png", "data": "abc"},
+                      {"type": "image", "mimeType": "image/png", "data": "abc%%%"},
+                      {"type": "image", "mimeType": "image/jpeg", "data": "abc"},
+                      {"type": "text", "mimeType": "image/png", "data": "abc"}):
+            with self.subTest(image=image):
+                CapturingHandler.response_body = {"result": {"content": [image]}}
+                response = RuntimeApiClient(self.base_url, auth_code="abc", timeout=5).request(
+                    "POST", "/mcp/analyst/rpc", {"method": "tools/call"})
+                self.assertNotIn("abc", response["result"]["content"][0]["data"])
 
     def test_post_request_sends_json_body(self) -> None:
         client = RuntimeApiClient(self.base_url, namespace="dev", timeout=5)

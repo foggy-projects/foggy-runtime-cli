@@ -17,6 +17,7 @@ from . import profiles
 from . import stack_cli
 from . import skills_cli
 from . import viewer_cli
+from . import image_cli
 from .client import RuntimeApiClient, RuntimeTransportError, path_quote
 from .input_utils import read_json_payload
 
@@ -406,6 +407,7 @@ def build_parser() -> argparse.ArgumentParser:
     query = subparsers.add_parser("query")
     query_commands = query.add_subparsers(dest="query_command", required=True)
     viewer_cli.register_query_command(query_commands)
+    image_cli.register_query_command(query_commands)
 
     query_validate = query_commands.add_parser("validate")
     query_validate.add_argument("model")

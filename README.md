@@ -4,8 +4,8 @@ Standalone CLI transport for `Foggy Runtime API v1` and the independent
 `Analytics Runtime API v1`.
 
 The CLI talks to public `/api/v1/*` operations under the configured base URL.
-`query open-in-viewer` uses the public MCP endpoint on the same server. It does
-not call Java or Python engine private routes.
+`query open-in-viewer` and `query export-image` use the public MCP endpoint on
+the same server. The CLI does not call Java or Python engine private routes.
 
 ## Opaque Onboarding Profiles
 
@@ -445,6 +445,142 @@ policies. The CLI does not fabricate links or pass a TTL override. A null link
 expiry is preserved when the server is configured for permanent links; session
 expiry is still enforced by the server. Treat generated links as private access
 links when recording demonstrations or saving output.
+
+### Export a query image
+
+This feature is currently on the development branches and has not been
+released. Local acceptance builds keep the existing version number; the
+published CLI `0.1.24` must not be assumed to include `query export-image`.
+
+`query export-image` calls the advertised `dataset.export_image` MCP tool. The
+Java Runtime executes the semantic query with the same namespace and model
+permissions, then renders a table, bar chart or line chart as PNG inside the JVM.
+No Docker, browser, Node service or local plotting package is needed. Python
+Runtime support is outside this initial feature.
+
+```powershell
+foggy --base-url http://127.0.0.1:18066 --namespace demo `
+  query export-image SalesQueryModel --payload .\monthly-sales.json `
+  --kind bar --x month --y totalAmount --title "月度销售额" --unit "元" `
+  --out .\sales.png
+
+foggy --base-url http://127.0.0.1:18066 --namespace demo `
+  query export-image SalesQueryModel --payload .\monthly-sales.json `
+  --kind table --title "月度销售明细" --columns .\image-columns.json `
+  --out .\sales-table.png
+```
+
+Use result field names from the described model/query output; chart fields are
+explicit `--x` and `--y` arguments. The CLI preserves the query DSL and never
+guesses a field, changes aggregation or reorders the data. Keep using
+`models describe` and `query validate` when preparing the payload.
+
+The optional `--columns` file is a UTF-8 JSON array:
+
+```json
+[
+  {"field": "month", "caption": "月份"},
+  {"field": "totalAmount", "caption": "销售额", "unit": "元"}
+]
+```
+
+The default kind is `table`. The Runtime chooses captions from query metadata
+when no override is supplied and loads its bundled Chinese font. `--x-label`,
+`--y-label` and `--unit` override chart labels without changing values. Width
+defaults to 1200 pixels (`--width` accepts 640..2400); optional `--height` accepts
+360..2400 for tables or 520..2400 for bar and line charts. Tables size their height
+to their content. `--max-rows` accepts 1..50
+for tables, 1..40 for bars or 1..100 for lines; omitted limits use those Runtime defaults.
+Tables support up to 12 columns, and omitted rows are visibly labelled.
+The Runtime validates label lengths and layout before rendering: title up to
+120 characters, field names and table captions up to 100, chart axis labels up
+to 80, and units up to 32. A length or layout error is returned without saving
+an image; shorten the explicit label rather than changing query values.
+
+The output directory must already exist. The CLI requests inline PNG content,
+checks strict base64, PNG chunk boundaries and CRCs, required image data and
+chunk ordering, dimensions and an 8 MiB size limit, then atomically replaces `--out`.
+A failed request, invalid image or failed save leaves an existing output file
+unchanged. JSON output contains the saved absolute path, dimensions and size;
+it never includes the base64 PNG, connection parameters or credentials.
+Images contain the selected query data, so share them with the intended audience.
+
+Authorization uses the same global option or environment variable as ordinary
+queries and is sent only in the MCP HTTP header. The default MCP endpoint and
+`--mcp-path` options match `query open-in-viewer`. The CLI never downloads an
+image URL or forwards credentials to an image host. Missing tool support exits
+with code 3; query/tool errors use 2, transport failures 4, and local input,
+image-format or file-write errors 1.
+
+Maintainer validation on 2026-10-03 used the checkout's actual source rather
+than an installed CLI package:
+
+```powershell
+python -m pytest tests/test_image_cli.py tests/test_viewer_cli.py `
+  tests/test_client_http.py tests/test_cli.py --override-ini pythonpath=src -q
+```
+
+The run passed 145 tests and 58 subtests. It covers HTTP namespace and opaque
+Authorization propagation, MCP tool discovery and errors, native image and
+structured/text response handling, invalid PNG/base64, damaged chunk CRCs,
+truncated or misordered chunks and size limits, height
+and row limits, credential redaction, and preservation of existing files after
+request, format or atomic-write failures. PNG base64 remains intact when a
+short credential coincidentally occurs in verified binary image content;
+malformed or disguised content still receives normal credential redaction.
+
+These CLI checks validate transport and file delivery. Rendering style,
+Chinese glyphs, actual query values and JVM resource use require the Java
+renderer and semantic-query integration checks. The CLI adds no rendering
+implementation or Python dependencies. Multi-result Compose and complex
+report design are outside this initial command. The command requires an MCP
+endpoint that advertises `dataset.export_image` and returns inline PNG;
+URL-only image responses are intentionally unsupported.
+
+For distribution acceptance, use `scripts/verify-query-images-delivery.py`
+against a running packaged Java fixture with `dataset.export_image` enabled.
+The helper requires Python 3.11+ and the packaging `build` module.
+Provide a non-sensitive query fixture, its explicit result fields and namespace.
+Set `FOGGY_RUNTIME_AUTHORIZATION` and `FOGGY_IMAGE_DENIED_AUTHORIZATION` to the
+fixture's distinct synthetic reader and denied identities. Set
+`FOGGY_IMAGE_FIXTURE_URL` to its local MCP server URL; the helper does not start
+Java or modify the global `foggy` installation.
+
+```powershell
+python scripts/verify-query-images-delivery.py `
+  --out ./build/query-images-delivery/run-001 `
+  --base-url $env:FOGGY_IMAGE_FIXTURE_URL `
+  --namespace image-primary --secondary-namespace image-secondary `
+  --model ImageSalesQuery --payload ./fixture-query.json `
+  --x month --y salesAmount
+```
+
+Use a fresh output directory for each full run. The helper builds wheel and
+sdist through isolated PEP 517 environments, installs each into its own new
+venv, clears `PYTHONPATH` and disables the user package site. It verifies the
+installed module and archive hashes, then invokes each installed `foggy`
+console entry point to save all three PNG kinds. The optional secondary
+namespace must contain the same model with different fixture values.
+
+The helper also checks denied permissions, invalid chart fields and preservation
+of an existing output file after failures. Older Runtime compatibility uses a
+controlled local `tools/list` stub that advertises no image tool, verifying
+exit code 3 and stopping before `tools/call`; it does not alter an existing
+older service. `receipt.json` records package hashes, relative installed-module
+paths, image metadata and error codes. It omits identities, the base URL,
+raw subprocess output and runtime parameters; generated images remain in the
+task output directory.
+
+Installed-package acceptance on 2026-10-03 passed for both local wheel and
+sdist builds. Each isolated installed `foggy` called a real packaged Java 17
+Runtime on Linux in headless mode with no system Chinese font. Both packages
+passed all seven cases: table, bar, line, namespace isolation, invalid field,
+permission denial and the controlled older-Runtime stub. Every failure
+preserved the existing file, and both packages produced identical PNG hashes.
+The table was 1200x595; bar and line images were 1200x700, each showing six
+actual fixture rows. The local receipt is under
+`build/query-images-delivery/cli/receipt.json`; these remain development
+acceptance artifacts, not a published CLI release.
 
 `query explain` is an evidence-only command for requests that explicitly ask how a result was produced, how a field or metric maps from QM to TM/physical SQL, or how permissions and pre-aggregation affect a query. Omit `--payload` for `DEFINITION`; provide a semantic query payload for `RECOMPILED`. It does not return business result rows and must not replace ordinary queries, model discovery, or semantic loading.
 
