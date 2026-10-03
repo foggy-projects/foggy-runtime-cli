@@ -4,8 +4,8 @@ Standalone CLI transport for `Foggy Runtime API v1` and the independent
 `Analytics Runtime API v1`.
 
 The CLI talks to public `/api/v1/*` operations under the configured base URL.
-`query open-in-viewer` uses the public MCP endpoint on the same server. It does
-not call Java or Python engine private routes.
+`query open-in-viewer` and `query export-image` use the public MCP endpoint on
+the same server. The CLI does not call Java or Python engine private routes.
 
 ## Opaque Onboarding Profiles
 
@@ -448,6 +448,10 @@ links when recording demonstrations or saving output.
 
 ### Export a query image
 
+This feature is currently on the development branches and has not been
+released. Local acceptance builds keep the existing version number; the
+published CLI `0.1.24` must not be assumed to include `query export-image`.
+
 `query export-image` calls the advertised `dataset.export_image` MCP tool. The
 Java Runtime executes the semantic query with the same namespace and model
 permissions, then renders a table, bar chart or line chart as PNG inside the JVM.
@@ -532,6 +536,51 @@ implementation or Python dependencies. Multi-result Compose and complex
 report design are outside this initial command. The command requires an MCP
 endpoint that advertises `dataset.export_image` and returns inline PNG;
 URL-only image responses are intentionally unsupported.
+
+For distribution acceptance, use `scripts/verify-query-images-delivery.py`
+against a running packaged Java fixture with `dataset.export_image` enabled.
+The helper requires Python 3.11+ and the packaging `build` module.
+Provide a non-sensitive query fixture, its explicit result fields and namespace.
+Set `FOGGY_RUNTIME_AUTHORIZATION` and `FOGGY_IMAGE_DENIED_AUTHORIZATION` to the
+fixture's distinct synthetic reader and denied identities. Set
+`FOGGY_IMAGE_FIXTURE_URL` to its local MCP server URL; the helper does not start
+Java or modify the global `foggy` installation.
+
+```powershell
+python scripts/verify-query-images-delivery.py `
+  --out ./build/query-images-delivery/run-001 `
+  --base-url $env:FOGGY_IMAGE_FIXTURE_URL `
+  --namespace image-primary --secondary-namespace image-secondary `
+  --model ImageSalesQuery --payload ./fixture-query.json `
+  --x month --y salesAmount
+```
+
+Use a fresh output directory for each full run. The helper builds wheel and
+sdist through isolated PEP 517 environments, installs each into its own new
+venv, clears `PYTHONPATH` and disables the user package site. It verifies the
+installed module and archive hashes, then invokes each installed `foggy`
+console entry point to save all three PNG kinds. The optional secondary
+namespace must contain the same model with different fixture values.
+
+The helper also checks denied permissions, invalid chart fields and preservation
+of an existing output file after failures. Older Runtime compatibility uses a
+controlled local `tools/list` stub that advertises no image tool, verifying
+exit code 3 and stopping before `tools/call`; it does not alter an existing
+older service. `receipt.json` records package hashes, relative installed-module
+paths, image metadata and error codes. It omits identities, the base URL,
+raw subprocess output and runtime parameters; generated images remain in the
+task output directory.
+
+Installed-package acceptance on 2026-10-03 passed for both local wheel and
+sdist builds. Each isolated installed `foggy` called a real packaged Java 17
+Runtime on Linux in headless mode with no system Chinese font. Both packages
+passed all seven cases: table, bar, line, namespace isolation, invalid field,
+permission denial and the controlled older-Runtime stub. Every failure
+preserved the existing file, and both packages produced identical PNG hashes.
+The table was 1200x595; bar and line images were 1200x700, each showing six
+actual fixture rows. The local receipt is under
+`build/query-images-delivery/cli/receipt.json`; these remain development
+acceptance artifacts, not a published CLI release.
 
 `query explain` is an evidence-only command for requests that explicitly ask how a result was produced, how a field or metric maps from QM to TM/physical SQL, or how permissions and pre-aggregation affect a query. Omit `--payload` for `DEFINITION`; provide a semantic query payload for `RECOMPILED`. It does not return business result rows and must not replace ordinary queries, model discovery, or semantic loading.
 
