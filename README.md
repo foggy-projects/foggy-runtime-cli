@@ -446,6 +446,93 @@ expiry is preserved when the server is configured for permanent links; session
 expiry is still enforced by the server. Treat generated links as private access
 links when recording demonstrations or saving output.
 
+### Export a query image
+
+`query export-image` calls the advertised `dataset.export_image` MCP tool. The
+Java Runtime executes the semantic query with the same namespace and model
+permissions, then renders a table, bar chart or line chart as PNG inside the JVM.
+No Docker, browser, Node service or local plotting package is needed. Python
+Runtime support is outside this initial feature.
+
+```powershell
+foggy --base-url http://127.0.0.1:18066 --namespace demo `
+  query export-image SalesQueryModel --payload .\monthly-sales.json `
+  --kind bar --x month --y totalAmount --title "月度销售额" --unit "元" `
+  --out .\sales.png
+
+foggy --base-url http://127.0.0.1:18066 --namespace demo `
+  query export-image SalesQueryModel --payload .\monthly-sales.json `
+  --kind table --title "月度销售明细" --columns .\image-columns.json `
+  --out .\sales-table.png
+```
+
+Use result field names from the described model/query output; chart fields are
+explicit `--x` and `--y` arguments. The CLI preserves the query DSL and never
+guesses a field, changes aggregation or reorders the data. Keep using
+`models describe` and `query validate` when preparing the payload.
+
+The optional `--columns` file is a UTF-8 JSON array:
+
+```json
+[
+  {"field": "month", "caption": "月份"},
+  {"field": "totalAmount", "caption": "销售额", "unit": "元"}
+]
+```
+
+The default kind is `table`. The Runtime chooses captions from query metadata
+when no override is supplied and loads its bundled Chinese font. `--x-label`,
+`--y-label` and `--unit` override chart labels without changing values. Width
+defaults to 1200 pixels (`--width` accepts 640..2400); optional `--height` accepts
+360..2400 for tables or 520..2400 for bar and line charts. Tables size their height
+to their content. `--max-rows` accepts 1..50
+for tables, 1..40 for bars or 1..100 for lines; omitted limits use those Runtime defaults.
+Tables support up to 12 columns, and omitted rows are visibly labelled.
+The Runtime validates label lengths and layout before rendering: title up to
+120 characters, field names and table captions up to 100, chart axis labels up
+to 80, and units up to 32. A length or layout error is returned without saving
+an image; shorten the explicit label rather than changing query values.
+
+The output directory must already exist. The CLI requests inline PNG content,
+checks strict base64, PNG chunk boundaries and CRCs, required image data and
+chunk ordering, dimensions and an 8 MiB size limit, then atomically replaces `--out`.
+A failed request, invalid image or failed save leaves an existing output file
+unchanged. JSON output contains the saved absolute path, dimensions and size;
+it never includes the base64 PNG, connection parameters or credentials.
+Images contain the selected query data, so share them with the intended audience.
+
+Authorization uses the same global option or environment variable as ordinary
+queries and is sent only in the MCP HTTP header. The default MCP endpoint and
+`--mcp-path` options match `query open-in-viewer`. The CLI never downloads an
+image URL or forwards credentials to an image host. Missing tool support exits
+with code 3; query/tool errors use 2, transport failures 4, and local input,
+image-format or file-write errors 1.
+
+Maintainer validation on 2026-10-03 used the checkout's actual source rather
+than an installed CLI package:
+
+```powershell
+python -m pytest tests/test_image_cli.py tests/test_viewer_cli.py `
+  tests/test_client_http.py tests/test_cli.py --override-ini pythonpath=src -q
+```
+
+The run passed 145 tests and 58 subtests. It covers HTTP namespace and opaque
+Authorization propagation, MCP tool discovery and errors, native image and
+structured/text response handling, invalid PNG/base64, damaged chunk CRCs,
+truncated or misordered chunks and size limits, height
+and row limits, credential redaction, and preservation of existing files after
+request, format or atomic-write failures. PNG base64 remains intact when a
+short credential coincidentally occurs in verified binary image content;
+malformed or disguised content still receives normal credential redaction.
+
+These CLI checks validate transport and file delivery. Rendering style,
+Chinese glyphs, actual query values and JVM resource use require the Java
+renderer and semantic-query integration checks. The CLI adds no rendering
+implementation or Python dependencies. Multi-result Compose and complex
+report design are outside this initial command. The command requires an MCP
+endpoint that advertises `dataset.export_image` and returns inline PNG;
+URL-only image responses are intentionally unsupported.
+
 `query explain` is an evidence-only command for requests that explicitly ask how a result was produced, how a field or metric maps from QM to TM/physical SQL, or how permissions and pre-aggregation affect a query. Omit `--payload` for `DEFINITION`; provide a semantic query payload for `RECOMPILED`. It does not return business result rows and must not replace ordinary queries, model discovery, or semantic loading.
 
 Use `wait-ready` after starting a local dev/test runtime. It polls `GET /api/v1/capabilities` until the Runtime API is reachable and returns success; transient transport failures are retained in JSON `data.attempts`.
